@@ -1,0 +1,21 @@
+{
+  "name": "openapi-mini-viewer-figma-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Figma plugin that renders compact editable Swagger/OpenAPI endpoint cards.",
+  "scripts": {
+    "build": "npm run build:ui && npm run build:main",
+    "build:ui": "vite build --config vite.ui.config.ts",
+    "build:main": "esbuild src/main.ts --bundle --outfile=dist/main.js --target=es2017 --format=iife",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.117.0",
+    "@types/node": "^22.15.21",
+    "esbuild": "^0.25.5",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.4"
+  }
+}

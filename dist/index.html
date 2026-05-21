@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAPI Mini Viewer</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #2f3442;
+        background: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 18px;
+        font-size: 12px;
+      }
+
+      form {
+        display: grid;
+        gap: 10px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-weight: 600;
+      }
+
+      input,
+      select {
+        width: 100%;
+        height: 34px;
+        border: 1px solid #c8cbd2;
+        border-radius: 6px;
+        padding: 0 10px;
+        color: #2f3442;
+        background: #ffffff;
+        font: inherit;
+        font-weight: 500;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: #18a058;
+        outline: 2px solid rgba(24, 160, 88, 0.18);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 70px 1fr;
+        gap: 10px;
+      }
+
+      .url-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: end;
+      }
+
+      .search-panel {
+        display: none;
+        gap: 8px;
+      }
+
+      .search-panel.visible {
+        display: grid;
+      }
+
+      .results {
+        max-height: 156px;
+        overflow: auto;
+        border: 1px solid #d9dce2;
+        border-radius: 6px;
+        background: #ffffff;
+      }
+
+      .result {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 8px;
+        width: 100%;
+        height: auto;
+        min-height: 40px;
+        padding: 7px 8px;
+        border: 0;
+        border-bottom: 1px solid #edf0f3;
+        border-radius: 0;
+        color: #2f3442;
+        background: #ffffff;
+        text-align: left;
+        font-weight: 500;
+      }
+
+      .result:hover,
+      .result.selected {
+        background: #eef9f3;
+      }
+
+      .result:last-child {
+        border-bottom: 0;
+      }
+
+      .method-badge {
+        min-width: 48px;
+        border-radius: 4px;
+        padding: 3px 6px;
+        color: #ffffff;
+        text-align: center;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .method-get {
+        background: #62a6fa;
+      }
+
+      .method-post {
+        background: #4ac987;
+      }
+
+      .method-put {
+        background: #f5a83f;
+      }
+
+      .method-delete {
+        background: #f26057;
+      }
+
+      .result-main {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #697080;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .result-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #2f3442;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      button {
+        height: 34px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 0 14px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        border-color: #c8cbd2;
+        color: #2f3442;
+        background: #ffffff;
+      }
+
+      button.primary {
+        color: #ffffff;
+        background: #2fc678;
+      }
+
+      button.refresh {
+        border-color: #2fc678;
+        color: #116b3c;
+        background: #eaf8f0;
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.62;
+      }
+
+      .message {
+        min-height: 34px;
+        border-radius: 6px;
+        padding: 9px 10px;
+        color: #596070;
+        background: #f3f5f7;
+      }
+
+      .message.error {
+        color: #a32f28;
+        background: #fff0ef;
+      }
+
+      .message.done {
+        color: #116b3c;
+        background: #eaf8f0;
+      }
+    </style>
+  </head>
+  <body>
+    <form id="form">
+      <div class="url-row">
+        <label>
+          Swagger/OpenAPI JSON URL
+          <input
+            id="swaggerUrl"
+            name="swaggerUrl"
+            type="url"
+            value="https://api.upkeepday.com/swagger.json"
+            required
+          />
+        </label>
+        <button class="secondary" type="button" id="loadSpec">Load</button>
+      </div>
+
+      <div id="searchPanel" class="search-panel">
+        <input id="search" name="search" type="search" placeholder="Search actions..." />
+        <div id="results" class="results" aria-live="polite"></div>
+      </div>
+
+      <div class="row">
+        <label>
+          Method
+          <select id="method" name="method">
+            <option selected>POST</option>
+            <option>GET</option>
+            <option>PUT</option>
+            <option>DELETE</option>
+          </select>
+        </label>
+
+        <label>
+          Path
+          <input id="path" name="path" type="text" value="/student/todos/action" required />
+        </label>
+      </div>
+
+      <div id="message" class="message">Fetch a public spec and generate an editable endpoint card.</div>
+
+      <div class="actions">
+        <button class="refresh" type="button" id="refresh" disabled>Refresh selected</button>
+        <button class="secondary" type="button" id="cancel">Cancel</button>
+        <button class="primary" type="submit" id="generate">Generate</button>
+      </div>
+    </form>
+
+    <script>
+      const form = document.getElementById("form");
+      const swaggerUrl = document.getElementById("swaggerUrl");
+      const path = document.getElementById("path");
+      const method = document.getElementById("method");
+      const message = document.getElementById("message");
+      const generate = document.getElementById("generate");
+      const cancel = document.getElementById("cancel");
+      const refresh = document.getElementById("refresh");
+      const loadSpec = document.getElementById("loadSpec");
+      const searchPanel = document.getElementById("searchPanel");
+      const search = document.getElementById("search");
+      const results = document.getElementById("results");
+      let actions = [];
+      let selectedActionKey = "";
+
+      function setMessage(text, state) {
+        message.textContent = text;
+        message.className = state ? `message ${state}` : "message";
+      }
+
+      function setLoading(isLoading) {
+        generate.disabled = isLoading;
+        cancel.disabled = isLoading;
+        loadSpec.disabled = isLoading;
+        refresh.disabled = isLoading || refresh.dataset.canRefresh !== "true";
+        generate.textContent = isLoading ? "Generating..." : "Generate";
+        refresh.textContent = isLoading ? "Refreshing..." : "Refresh selected";
+        loadSpec.textContent = isLoading ? "Loading..." : "Load";
+      }
+
+      function validateUrl() {
+        try {
+          const url = new URL(swaggerUrl.value.trim());
+          if (url.protocol !== "https:" && url.protocol !== "http:") {
+            return "URL must start with http:// or https://.";
+          }
+        } catch {
+          return "Enter a valid Swagger/OpenAPI JSON URL.";
+        }
+
+        return "";
+      }
+
+      function validatePath() {
+        if (!path.value.trim().startsWith("/")) {
+          return "Path must start with a slash.";
+        }
+
+        return "";
+      }
+
+      function renderResults() {
+        const query = search.value.trim().toLowerCase();
+        const matches = actions
+          .filter((action) => !query || action.searchIndex.includes(query))
+          .slice(0, 80);
+
+        results.innerHTML = "";
+
+        if (matches.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "result-meta";
+          empty.style.padding = "10px";
+          empty.textContent = actions.length === 0 ? "Load a spec to search actions." : "No matching actions.";
+          results.appendChild(empty);
+          return;
+        }
+
+        for (const action of matches) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `result ${selectedActionKey === actionKey(action) ? "selected" : ""}`;
+
+          const methodBadge = document.createElement("span");
+          methodBadge.className = `method-badge method-${action.method.toLowerCase()}`;
+          methodBadge.textContent = action.method;
+
+          const content = document.createElement("span");
+          const main = document.createElement("div");
+          main.className = "result-main";
+          main.textContent = action.tag || "Untagged";
+
+          const meta = document.createElement("div");
+          meta.className = "result-meta";
+          meta.textContent = action.path;
+
+          content.appendChild(main);
+          content.appendChild(meta);
+          button.appendChild(methodBadge);
+          button.appendChild(content);
+          button.addEventListener("click", () => selectAction(action));
+          results.appendChild(button);
+        }
+      }
+
+      function selectAction(action) {
+        selectedActionKey = actionKey(action);
+        method.value = action.method;
+        path.value = action.path;
+        setMessage(`Selected ${action.label}.`, "done");
+        renderResults();
+      }
+
+      function actionKey(action) {
+        return `${action.method} ${action.path}`;
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const error = validateUrl() || validatePath();
+
+        if (error) {
+          setMessage(error, "error");
+          return;
+        }
+
+        setLoading(true);
+        setMessage("Fetching spec and building Figma layers...");
+        parent.postMessage({
+          pluginMessage: {
+            type: "generate",
+            swaggerUrl: swaggerUrl.value.trim(),
+            method: method.value,
+            path: path.value.trim()
+          }
+        }, "*");
+      });
+
+      loadSpec.addEventListener("click", () => {
+        const error = validateUrl();
+
+        if (error) {
+          setMessage(error, "error");
+          return;
+        }
+
+        setLoading(true);
+        setMessage("Loading Swagger actions...");
+        parent.postMessage({
+          pluginMessage: {
+            type: "loadSpec",
+            swaggerUrl: swaggerUrl.value.trim()
+          }
+        }, "*");
+      });
+
+      search.addEventListener("input", renderResults);
+
+      cancel.addEventListener("click", () => {
+        parent.postMessage({ pluginMessage: { type: "cancel" } }, "*");
+      });
+
+      refresh.addEventListener("click", () => {
+        setLoading(true);
+        setMessage("Refreshing selected endpoint card...");
+        parent.postMessage({ pluginMessage: { type: "refresh" } }, "*");
+      });
+
+      window.onmessage = (event) => {
+        const pluginMessage = event.data.pluginMessage;
+        if (!pluginMessage) return;
+
+        setLoading(false);
+
+        if (pluginMessage.type === "error") {
+          setMessage(pluginMessage.message, "error");
+        }
+
+        if (pluginMessage.type === "done") {
+          setMessage(`${pluginMessage.action || "Updated"} ${pluginMessage.layerName}.`, "done");
+        }
+
+        if (pluginMessage.type === "actions") {
+          actions = pluginMessage.actions || [];
+          selectedActionKey = "";
+          searchPanel.classList.add("visible");
+          search.value = "";
+          renderResults();
+          setMessage(`Loaded ${actions.length} actions. Search and select one, or enter method/path manually.`, "done");
+        }
+
+        if (pluginMessage.type === "selection") {
+          refresh.dataset.canRefresh = pluginMessage.canRefresh ? "true" : "false";
+          refresh.disabled = !pluginMessage.canRefresh;
+
+          if (pluginMessage.config) {
+            swaggerUrl.value = pluginMessage.config.swaggerUrl;
+            method.value = pluginMessage.config.method;
+            path.value = pluginMessage.config.path;
+            setMessage("Selected card can be refreshed.", "done");
+          }
+        }
+
+        if (pluginMessage.type === "variables") {
+          if (pluginMessage.config.swaggerUrl) {
+            swaggerUrl.value = pluginMessage.config.swaggerUrl;
+          }
+
+          if (pluginMessage.config.method) {
+            method.value = pluginMessage.config.method;
+          }
+
+          if (pluginMessage.config.path) {
+            path.value = pluginMessage.config.path;
+          }
+
+          setMessage("Loaded values from Figma variables.", "done");
+        }
+      };
+    </script>
+  </body>
+</html>
