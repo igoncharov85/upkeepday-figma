@@ -11,6 +11,8 @@ npm run build
 
 Then import `manifest.json` in Figma through **Widgets > Development > Import widget from manifest...**.
 
+The widget icon source asset is included at `assets/upkeepday-fav.png`, with a bundled widget-sized version at `assets/upkeepday-widget-icon.png`. Figma development widget manifests do not expose a supported picker icon field, so local mode will still use Figma's default development icon; the bundled icon is rendered inside the widget and can be used when setting the widget icon in Figma's publish/configuration flow.
+
 ## Usage
 
 Insert the widget to open configuration automatically, or use **Configure** from the widget controls or property menu later and enter:

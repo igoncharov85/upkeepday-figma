@@ -1,8 +1,9 @@
 import { buildEndpointViewModel, extractSwaggerActions, normalizeMethod, type EndpointViewModel, type GenerateInput, type HttpMethod, type SwaggerAction } from "./openapi";
 import { jsonToLines, type JsonChunk } from "./widgetJson";
+import widgetIcon from "../assets/upkeepday-widget-icon.png";
 
 const { widget } = figma;
-const { AutoLayout, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
+const { AutoLayout, Image, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
 
 const DEFAULT_SWAGGER_URL = "https://api.upkeepday.com/swagger.json";
 const LAST_CONFIG_STORAGE_KEY = "openapi-mini-viewer:last-config";
@@ -189,6 +190,7 @@ function OpenApiMiniViewerWidget() {
         </>
       ) : null}
       <AutoLayout direction="horizontal" spacing={8} padding={{ top: 8, right: 8, bottom: 8, left: 8 }} fill={COLORS.white} width={CARD_WIDTH} verticalAlignItems="center">
+        <Image name="UpKeepDay Icon" src={widgetIcon} width={18} height={18} />
         <ActionButton label="Configure" onClick={() => openConfigure(config, Boolean(model))} />
         <ActionButton label="Refresh" onClick={() => waitForTask(refreshConfig(config))} />
         {lastUpdatedAt ? <Text fontSize={10} fill={COLORS.text}>Updated {formatUpdatedAt(lastUpdatedAt)}</Text> : null}
