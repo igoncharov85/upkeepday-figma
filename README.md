@@ -1,6 +1,6 @@
-# OpenAPI Mini Viewer Figma Plugin
+# OpenAPI Mini Viewer Figma Widget
 
-Generates compact, editable Swagger/OpenAPI endpoint cards in Figma.
+Renders compact Swagger/OpenAPI endpoint cards as a Figma widget.
 
 ## Development
 
@@ -9,28 +9,28 @@ npm install
 npm run build
 ```
 
-Then import `manifest.json` in Figma through **Plugins > Development > Import plugin from manifest...**.
+Then import `manifest.json` in Figma through **Widgets > Development > Import widget from manifest...**.
 
 ## Usage
 
-Run the plugin and enter:
+Insert the widget to open configuration automatically, or use **Configure** from the widget controls or property menu later and enter:
 
 - Swagger/OpenAPI JSON URL, for example `https://api.upkeepday.com/swagger.json`
 - Method: `GET`, `POST`, `PUT`, or `DELETE`
 - Path, for example `/student/todos/action`
 
-Click **Load spec** to fetch the Swagger/OpenAPI file and search available actions by path, method, operation id, tag, summary, or description. Selecting a result fills the Method and Path fields; direct manual entry still works.
+Click **Load** to fetch the Swagger/OpenAPI file and search available actions by path, method, operation id, tag, summary, or description. Selecting a result fills the Method and Path fields; direct manual entry still works.
 
-If local Figma string variables named `SwaggerUrl`, `ApiAction`, and `ApiPath` exist, the plugin uses them to prefill the fields when it opens.
+After a successful generate or refresh, the widget saves only the Swagger URL for the next inserted widget. Method and Path are prefilled only when local Figma variables `ApiAction` and `ApiPath` are defined and non-empty.
 
-The plugin creates native Figma layers for the endpoint header, request body example, and `200` response example. It does not call the API endpoint itself.
+The widget renders the endpoint header, request body example, and `200` response example. It does not call the API endpoint itself, and the displayed content is edited through widget configuration rather than ordinary editable Figma layers.
 
 ## Refreshing
 
-Generated frames store their Swagger URL, method, and path. Select a generated frame and either:
+The widget stores its Swagger URL, method, and path in synced state. Refresh it with:
 
-- Click **Refresh selected** in the plugin UI.
-- Use the Figma relaunch button **Refresh OpenAPI card** from the selected frame's properties panel.
+- The visible **Refresh** control on the widget.
+- The widget property menu **Refresh** action.
 
 ## Checks
 

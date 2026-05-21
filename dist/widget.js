@@ -382,25 +382,50 @@
     return !boundary.test(previous != null ? previous : "") && !boundary.test(next != null ? next : "");
   }
 
-  // src/render.ts
-  var COLORS = {
-    borderGreen: rgb(0.12, 0.78, 0.46),
-    methodGreen: rgb(0.29, 0.79, 0.54),
-    paleGreen: rgb(0.91, 0.97, 0.94),
-    paleGreenAlt: rgb(0.88, 0.95, 0.91),
-    white: rgb(1, 1, 1),
-    text: rgb(0.21, 0.23, 0.31),
-    muted: rgb(0.48, 0.51, 0.55),
-    divider: rgb(0.7, 0.74, 0.76),
-    codeBackground: rgb(0.18, 0.18, 0.18),
-    codeNumber: rgb(0.93, 0.38, 0.38),
-    codeString: rgb(0.55, 1, 0.6),
-    codeBoolean: rgb(1, 0.63, 0.36)
-  };
-  var FONT = { family: "Inter", style: "Regular" };
-  var FONT_BOLD = { family: "Inter", style: "Bold" };
-  var FONT_ITALIC = { family: "Inter", style: "Italic" };
-  var FONT_MONO = { family: "Roboto Mono", style: "Regular" };
+  // src/widgetJson.ts
+  function jsonToLines(json) {
+    const ranges = highlightJson(json);
+    const chunks = [];
+    let cursor = 0;
+    for (const range of ranges) {
+      if (range.start > cursor) {
+        chunks.push({ text: json.slice(cursor, range.start) });
+      }
+      chunks.push({
+        text: json.slice(range.start, range.end),
+        kind: range.kind
+      });
+      cursor = range.end;
+    }
+    if (cursor < json.length) {
+      chunks.push({ text: json.slice(cursor) });
+    }
+    return splitChunksByLine(chunks.length > 0 ? chunks : [{ text: json }]);
+  }
+  function splitChunksByLine(chunks) {
+    const lines = [[]];
+    for (const chunk of chunks) {
+      const parts = chunk.text.split("\n");
+      parts.forEach((part, index) => {
+        if (index > 0) {
+          lines.push([]);
+        }
+        if (part.length > 0) {
+          lines[lines.length - 1].push({
+            text: part,
+            kind: chunk.kind
+          });
+        }
+      });
+    }
+    return lines;
+  }
+
+  // src/widget.tsx
+  var { widget } = figma;
+  var { AutoLayout, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
+  var DEFAULT_SWAGGER_URL = "https://api.upkeepday.com/swagger.json";
+  var LAST_CONFIG_STORAGE_KEY = "openapi-mini-viewer:last-config";
   var CARD_WIDTH = 760;
   var CODE_MIN_WIDTH = CARD_WIDTH - 12;
   var CODE_MAX_WIDTH = 1800;
@@ -409,218 +434,227 @@
   var CODE_HORIZONTAL_PADDING = 28;
   var CODE_VERTICAL_PADDING = 24;
   var CODE_CHAR_WIDTH = 8.1;
-  var codeFont = FONT_MONO;
-  async function renderEndpointCard(model, options = {}) {
-    await loadFonts();
-    const card = figma.createFrame();
-    card.name = `OpenAPI Mini Viewer - ${model.method} ${model.path}`;
-    card.layoutMode = "VERTICAL";
-    card.primaryAxisSizingMode = "AUTO";
-    card.counterAxisSizingMode = "FIXED";
-    card.resize(CARD_WIDTH, 100);
-    card.itemSpacing = 0;
-    card.paddingTop = 0;
-    card.paddingRight = 0;
-    card.paddingBottom = 0;
-    card.paddingLeft = 0;
-    card.cornerRadius = 0;
-    card.fills = [{ type: "SOLID", color: COLORS.white }];
-    card.strokes = [{ type: "SOLID", color: COLORS.borderGreen }];
-    card.strokeWeight = 2;
-    if (model.tag) {
-      card.appendChild(createTitle(model.tag));
+  var COLORS = {
+    borderGreen: "#1ec775",
+    methodGreen: "#4ac987",
+    paleGreen: "#e8f7ef",
+    paleGreenAlt: "#e1f2e9",
+    white: "#ffffff",
+    text: "#353a4b",
+    muted: "#747b87",
+    divider: "#b3bbc2",
+    codeBackground: "#2e2e2e",
+    codeNumber: "#ed6161",
+    codeString: "#8cff99",
+    codeBoolean: "#ffa15c",
+    blue: "#62a6fa",
+    orange: "#f5a83f",
+    red: "#f26057"
+  };
+  var cachedSpecUrl = "";
+  var cachedSpec;
+  function OpenApiMiniViewerWidget() {
+    var _a, _b;
+    const widgetNodeId = useWidgetNodeId();
+    const [swaggerUrl, setSwaggerUrl] = useSyncedState("swaggerUrl", DEFAULT_SWAGGER_URL);
+    const [method, setMethod] = useSyncedState("method", "");
+    const [path, setPath] = useSyncedState("path", "");
+    const [model, setModel] = useSyncedState("model", null);
+    const [error, setError] = useSyncedState("error", "");
+    const [loadingMessage, setLoadingMessage] = useSyncedState("loadingMessage", "");
+    const [initialized, setInitialized] = useSyncedState("initialized", false);
+    const [lastUpdatedAt, setLastUpdatedAt] = useSyncedState("lastUpdatedAt", "");
+    const config = { swaggerUrl, method, path };
+    useEffect(() => {
+      if (initialized) return;
+      waitForTask((async () => {
+        var _a2, _b2, _c;
+        const savedSwaggerUrl = await readSavedSwaggerUrl();
+        const variableConfig = await readVariableConfig();
+        const nextConfig = {
+          swaggerUrl: (_a2 = savedSwaggerUrl != null ? savedSwaggerUrl : variableConfig.swaggerUrl) != null ? _a2 : swaggerUrl,
+          method: (_b2 = variableConfig.method) != null ? _b2 : "",
+          path: (_c = variableConfig.path) != null ? _c : ""
+        };
+        setSwaggerUrl(nextConfig.swaggerUrl);
+        setMethod(nextConfig.method);
+        setPath(nextConfig.path);
+        setInitialized(true);
+        openConfigure(nextConfig, Boolean(model));
+      })());
+    });
+    usePropertyMenu([
+      { itemType: "action", propertyName: "configure", tooltip: "Configure" },
+      { itemType: "action", propertyName: "refresh", tooltip: "Refresh" }
+    ], ({ propertyName }) => {
+      if (propertyName === "configure") {
+        openConfigure(config, Boolean(model));
+      }
+      if (propertyName === "refresh") {
+        waitForTask(refreshConfig(config));
+      }
+    });
+    async function handleLoadSpec(nextSwaggerUrl) {
+      setLoadingMessage("Loading Swagger actions...");
+      try {
+        const actions = await loadSpecActions(nextSwaggerUrl);
+        postUiMessage({ type: "actions", swaggerUrl: nextSwaggerUrl, actions });
+      } catch (loadError) {
+        postError(loadError);
+      } finally {
+        setLoadingMessage("");
+      }
     }
-    card.appendChild(createHeader(model.method, model.path));
-    card.appendChild(createCompactSectionTitle("Parameters"));
-    card.appendChild(createRequestSection(model.request));
-    card.appendChild(createCompactSectionTitle("Responses"));
-    card.appendChild(createResponseSection(model));
-    insertCard(card, options.replaceNode);
-    figma.currentPage.selection = [card];
-    figma.viewport.scrollAndZoomIntoView([card]);
-    return card;
-  }
-  function createTitle(tag) {
-    const title = figma.createFrame();
-    title.name = "API Group";
-    title.layoutMode = "HORIZONTAL";
-    title.primaryAxisSizingMode = "FIXED";
-    title.counterAxisSizingMode = "FIXED";
-    title.resize(CARD_WIDTH, 60);
-    title.paddingLeft = 10;
-    title.paddingRight = 10;
-    title.itemSpacing = 14;
-    title.counterAxisAlignItems = "CENTER";
-    title.fills = [{ type: "SOLID", color: COLORS.white }];
-    const heading = createText(tag, 34, FONT_BOLD, COLORS.text);
-    heading.name = "Tag";
-    heading.textAutoResize = "WIDTH_AND_HEIGHT";
-    title.appendChild(heading);
-    return title;
-  }
-  function createHeader(method, path) {
-    const header = figma.createFrame();
-    header.name = "Endpoint";
-    header.layoutMode = "HORIZONTAL";
-    header.primaryAxisSizingMode = "FIXED";
-    header.counterAxisSizingMode = "FIXED";
-    header.resize(CARD_WIDTH, 56);
-    header.itemSpacing = 16;
-    header.paddingTop = 8;
-    header.paddingRight = 10;
-    header.paddingBottom = 8;
-    header.paddingLeft = 4;
-    header.counterAxisAlignItems = "CENTER";
-    header.fills = [{ type: "SOLID", color: COLORS.paleGreen }];
-    const methodBadge = figma.createFrame();
-    methodBadge.name = "Method";
-    methodBadge.layoutMode = "HORIZONTAL";
-    methodBadge.primaryAxisSizingMode = "FIXED";
-    methodBadge.counterAxisSizingMode = "FIXED";
-    methodBadge.resize(118, 42);
-    methodBadge.counterAxisAlignItems = "CENTER";
-    methodBadge.primaryAxisAlignItems = "CENTER";
-    methodBadge.cornerRadius = 4;
-    methodBadge.fills = [{ type: "SOLID", color: methodColor(method) }];
-    const methodText = createText(method, 20, FONT_BOLD, COLORS.white);
-    methodText.textAutoResize = "WIDTH_AND_HEIGHT";
-    methodBadge.appendChild(methodText);
-    const pathText = createText(path, 27, FONT_BOLD, COLORS.text);
-    pathText.name = "Path";
-    pathText.textAutoResize = "HEIGHT";
-    pathText.resize(CARD_WIDTH - 154, pathText.height);
-    header.appendChild(methodBadge);
-    header.appendChild(pathText);
-    return header;
-  }
-  function createCompactSectionTitle(title) {
-    const section = figma.createFrame();
-    section.name = title;
-    section.layoutMode = "VERTICAL";
-    section.primaryAxisSizingMode = "AUTO";
-    section.counterAxisSizingMode = "FIXED";
-    section.resize(CARD_WIDTH, 34);
-    section.paddingTop = 6;
-    section.paddingRight = 6;
-    section.paddingBottom = 4;
-    section.paddingLeft = 6;
-    section.fills = [{ type: "SOLID", color: COLORS.white }];
-    const text = createText(title, 20, FONT_BOLD, COLORS.text);
-    text.textAutoResize = "WIDTH_AND_HEIGHT";
-    section.appendChild(text);
-    return section;
-  }
-  function createRequestSection(request) {
-    const section = createCompactBody("Parameters Body");
-    if (!request) {
-      section.appendChild(createEmptyState("No request body parameters."));
-      return section;
+    async function applyConfigAndRender(nextConfig) {
+      setSwaggerUrl(nextConfig.swaggerUrl);
+      setMethod(nextConfig.method);
+      setPath(nextConfig.path);
+      try {
+        await renderEndpoint(requireRenderableConfig(nextConfig));
+      } catch (renderError) {
+        postError(renderError);
+      }
     }
-    section.appendChild(createCodeBlock(request.exampleJson));
-    return section;
+    async function refreshConfig(nextConfig) {
+      try {
+        await renderEndpoint(requireRenderableConfig(nextConfig), true);
+      } catch (refreshError) {
+        postError(refreshError);
+      }
+    }
+    async function renderEndpoint(nextConfig, forceFetch = false) {
+      setLoadingMessage(forceFetch ? "Refreshing endpoint..." : "Rendering endpoint...");
+      try {
+        setError("");
+        const nextModel = await loadEndpoint(nextConfig, forceFetch);
+        setModel(nextModel);
+        await renameWidget(widgetNodeId, endpointCanvasName(nextModel));
+        setLastUpdatedAt((/* @__PURE__ */ new Date()).toISOString());
+        await saveSwaggerUrl(nextConfig.swaggerUrl);
+        postUiMessage({ type: "done", layerName: `${nextModel.method} ${nextModel.path}`, action: forceFetch ? "Refreshed" : "Rendered" });
+      } catch (refreshError) {
+        postError(refreshError);
+      } finally {
+        setLoadingMessage("");
+      }
+    }
+    function postError(rawError) {
+      const message = rawError instanceof Error ? rawError.message : "Something went wrong.";
+      setError(message);
+      postUiMessage({ type: "error", message });
+    }
+    function postUiMessage(message) {
+      try {
+        figma.ui.postMessage(message);
+      } catch (e) {
+      }
+    }
+    return /* @__PURE__ */ figma.widget.h(
+      AutoLayout,
+      {
+        name: model ? endpointCanvasName(model) : "OpenAPI Mini Viewer Widget",
+        direction: "vertical",
+        width: CARD_WIDTH,
+        padding: 0,
+        spacing: 0,
+        fill: COLORS.white,
+        stroke: COLORS.borderGreen,
+        strokeWidth: 2,
+        overflow: "visible"
+      },
+      (model == null ? void 0 : model.tag) ? /* @__PURE__ */ figma.widget.h(Title, { tag: model.tag }) : null,
+      /* @__PURE__ */ figma.widget.h(Header, { method: (_a = model == null ? void 0 : model.method) != null ? _a : method, path: (_b = model == null ? void 0 : model.path) != null ? _b : path }),
+      loadingMessage ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted" }) : null,
+      error ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: error, tone: "error" }) : null,
+      !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Configure or refresh to render an OpenAPI endpoint.", tone: "muted" }) : null,
+      model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.response.exampleJson }))) : null,
+      /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: 8, padding: { top: 8, right: 8, bottom: 8, left: 8 }, fill: COLORS.white, width: CARD_WIDTH, verticalAlignItems: "center" }, /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Configure", onClick: () => openConfigure(config, Boolean(model)) }), /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Refresh", onClick: () => waitForTask(refreshConfig(config)) }), lastUpdatedAt ? /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, "Updated ", formatUpdatedAt(lastUpdatedAt)) : null)
+    );
+    function openConfigure(currentConfig, canRefresh) {
+      waitForTask(new Promise((resolve) => {
+        let isClosed = false;
+        let sessionConfig = currentConfig;
+        const closeSession = () => {
+          if (isClosed) return;
+          isClosed = true;
+          resolve();
+        };
+        figma.ui.onmessage = (message) => {
+          let payload;
+          try {
+            payload = parseMessage(message);
+          } catch (messageError) {
+            postError(messageError);
+            return;
+          }
+          if (!payload) return;
+          if (payload.type === "cancel") {
+            figma.ui.hide();
+            closeSession();
+            return;
+          }
+          if (payload.type === "loadSpec") {
+            waitForTask(handleLoadSpec(payload.swaggerUrl));
+            return;
+          }
+          if (payload.type === "refresh") {
+            waitForTask(refreshConfig(sessionConfig));
+            return;
+          }
+          sessionConfig = {
+            swaggerUrl: payload.swaggerUrl,
+            method: normalizeMethod(payload.method),
+            path: payload.path
+          };
+          waitForTask(applyConfigAndRender(sessionConfig));
+        };
+        figma.showUI(__html__, { width: 380, height: 398, themeColors: true });
+        figma.ui.postMessage({
+          type: "selection",
+          canRefresh,
+          config: currentConfig
+        });
+      }));
+    }
   }
-  function createResponseSection(model) {
-    const section = createCompactBody("Responses Body");
-    section.appendChild(createCodeBlock(model.response.exampleJson));
-    return section;
+  function Title({ tag }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, height: 60, padding: { left: 10, right: 10 }, verticalAlignItems: "center", fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 34, fontWeight: "bold", fill: COLORS.text }, tag));
   }
-  function createCompactBody(name) {
-    const section = figma.createFrame();
-    section.name = name;
-    section.layoutMode = "VERTICAL";
-    section.primaryAxisSizingMode = "AUTO";
-    section.counterAxisSizingMode = "FIXED";
-    section.resize(CARD_WIDTH, 100);
-    section.itemSpacing = 6;
-    section.paddingTop = 0;
-    section.paddingRight = 6;
-    section.paddingBottom = 6;
-    section.paddingLeft = 6;
-    section.fills = [{ type: "SOLID", color: COLORS.paleGreenAlt }];
-    return section;
+  function Header({ method, path }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, height: 56, direction: "horizontal", spacing: 16, padding: { top: 8, right: 10, bottom: 8, left: 4 }, verticalAlignItems: "center", fill: COLORS.paleGreen }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: CARD_WIDTH - 154, fontSize: 27, fontWeight: "bold", fill: COLORS.text }, path));
   }
-  function createCodeBlock(json) {
+  function SectionTitle({ title }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, padding: { top: 6, right: 6, bottom: 4, left: 6 }, fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.text }, title));
+  }
+  function SectionBody({ children }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, direction: "vertical", padding: { right: 6, bottom: 6, left: 6 }, spacing: 6, fill: COLORS.paleGreenAlt, overflow: "visible" }, children);
+  }
+  function CodeBlock({ json }) {
     const width = codeBlockWidth(json);
     const height = codeBlockHeight(json);
-    const code = figma.createFrame();
-    code.name = "JSON Example";
-    code.layoutMode = "VERTICAL";
-    code.primaryAxisSizingMode = "AUTO";
-    code.counterAxisSizingMode = "FIXED";
-    code.resize(width, height);
-    code.paddingTop = 12;
-    code.paddingRight = 14;
-    code.paddingBottom = 12;
-    code.paddingLeft = 14;
-    code.cornerRadius = 4;
-    code.fills = [{ type: "SOLID", color: COLORS.codeBackground }];
-    const text = createText(json, CODE_FONT_SIZE, codeFont, COLORS.white);
-    text.name = "JSON";
-    text.lineHeight = { unit: "PIXELS", value: CODE_LINE_HEIGHT };
-    text.textAutoResize = "HEIGHT";
-    text.resize(width - CODE_HORIZONTAL_PADDING, text.height);
-    applyJsonHighlighting(text, json);
-    code.appendChild(text);
-    return code;
+    const lines = jsonToLines(json);
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width, height, direction: "vertical", padding: { top: 12, right: 14, bottom: 12, left: 14 }, fill: COLORS.codeBackground, cornerRadius: 4, spacing: 0 }, lines.map((line, index) => /* @__PURE__ */ figma.widget.h(Text, { key: index, width: width - CODE_HORIZONTAL_PADDING, height: CODE_LINE_HEIGHT, fontFamily: "Roboto Mono", fontSize: CODE_FONT_SIZE, lineHeight: CODE_LINE_HEIGHT, fill: COLORS.white }, line.length > 0 ? line.map((chunk, chunkIndex) => /* @__PURE__ */ figma.widget.h(Span, { key: chunkIndex, fill: chunkColor(chunk) }, chunk.text)) : " ")));
   }
-  function createEmptyState(message) {
-    const text = createText(message, 15, FONT, COLORS.muted);
-    text.textAutoResize = "WIDTH_AND_HEIGHT";
-    return text;
+  function ActionButton({ label, onClick }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { height: 30, padding: { left: 12, right: 12 }, cornerRadius: 4, fill: COLORS.paleGreen, stroke: COLORS.borderGreen, strokeWidth: 1, verticalAlignItems: "center", horizontalAlignItems: "center", onClick }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 12, fontWeight: "bold", fill: COLORS.text }, label));
   }
-  function createText(characters, size, fontName, color) {
-    const text = figma.createText();
-    text.fontName = fontName;
-    text.fontSize = size;
-    text.characters = characters;
-    text.fills = [{ type: "SOLID", color }];
-    return text;
+  function StatusMessage({ message, tone }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, padding: { top: 8, right: 8, bottom: 8, left: 8 }, fill: tone === "error" ? "#fff0ef" : COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 12, fill: tone === "error" ? COLORS.red : COLORS.muted }, message));
+  }
+  function MutedText({ children }) {
+    return /* @__PURE__ */ figma.widget.h(Text, { fontSize: 15, fill: COLORS.muted }, children);
   }
   function methodColor(method) {
-    if (method === "GET") return rgb(0.38, 0.65, 0.98);
-    if (method === "DELETE") return rgb(0.95, 0.38, 0.34);
-    if (method === "PUT") return rgb(0.96, 0.66, 0.25);
+    if (method === "GET") return COLORS.blue;
+    if (method === "DELETE") return COLORS.red;
+    if (method === "PUT") return COLORS.orange;
     return COLORS.methodGreen;
   }
-  async function loadFonts() {
-    await Promise.all([
-      figma.loadFontAsync(FONT),
-      figma.loadFontAsync(FONT_BOLD),
-      figma.loadFontAsync(FONT_ITALIC)
-    ]);
-    try {
-      await figma.loadFontAsync(FONT_MONO);
-      codeFont = FONT_MONO;
-    } catch (e) {
-      codeFont = FONT;
-    }
-  }
-  function insertCard(card, replaceNode) {
-    if (replaceNode == null ? void 0 : replaceNode.parent) {
-      const parent = replaceNode.parent;
-      const index = parent.children.indexOf(replaceNode);
-      card.x = replaceNode.x;
-      card.y = replaceNode.y;
-      parent.insertChild(index, card);
-      replaceNode.remove();
-      return;
-    }
-    positionCard(card);
-    figma.currentPage.appendChild(card);
-  }
-  function positionCard(card) {
-    const selection = figma.currentPage.selection[0];
-    if (selection) {
-      card.x = selection.x + selection.width + 40;
-      card.y = selection.y;
-      return;
-    }
-    const center = figma.viewport.center;
-    card.x = center.x - 280;
-    card.y = center.y - 260;
-  }
-  function rgb(r, g, b) {
-    return { r, g, b };
+  function chunkColor(chunk) {
+    if (chunk.kind === "number") return COLORS.codeNumber;
+    if (chunk.kind === "boolean") return COLORS.codeBoolean;
+    if (chunk.kind === "string") return COLORS.codeString;
+    return COLORS.white;
   }
   function codeBlockWidth(json) {
     const longestLine = json.split("\n").reduce((longest, line) => Math.max(longest, line.length), 0);
@@ -631,61 +665,37 @@
     const lineCount = Math.max(1, json.split("\n").length);
     return lineCount * CODE_LINE_HEIGHT + CODE_VERTICAL_PADDING;
   }
-  function applyJsonHighlighting(text, json) {
-    for (const range of highlightJson(json)) {
-      text.setRangeFills(range.start, range.end, [{
-        type: "SOLID",
-        color: codeTokenColor(range.kind)
-      }]);
+  async function loadEndpoint(input, forceFetch = false) {
+    const spec = await fetchSpec(input.swaggerUrl, forceFetch);
+    return buildEndpointViewModel(spec, input);
+  }
+  async function loadSpecActions(swaggerUrl) {
+    const spec = await fetchSpec(swaggerUrl, true);
+    return extractSwaggerActions(spec);
+  }
+  async function renameWidget(widgetNodeId, name) {
+    const node = await figma.getNodeByIdAsync(widgetNodeId);
+    if ((node == null ? void 0 : node.type) === "WIDGET") {
+      node.name = name;
     }
   }
-  function codeTokenColor(kind) {
-    if (kind === "number") return COLORS.codeNumber;
-    if (kind === "boolean") return COLORS.codeBoolean;
-    return COLORS.codeString;
+  function endpointCanvasName(endpoint) {
+    return `${endpoint.method} ${endpoint.path} (${swaggerUrlName(endpoint.swaggerUrl)})`;
   }
-
-  // src/main.ts
-  var CONFIG_KEY = "openapi-mini-viewer-config";
-  var cachedSpec;
-  var cachedSpecUrl = "";
-  if (figma.command === "refresh") {
-    refreshFromRelaunch();
-  } else {
-    setupUi();
+  function swaggerUrlName(swaggerUrl) {
+    return swaggerUrl.replace(/^https?:\/\//i, "");
   }
-  function setupUi() {
-    figma.showUI(__html__, { width: 380, height: 398, themeColors: true });
-    postInitialStateFromVariables();
-    figma.on("selectionchange", postSelectionState);
-    figma.ui.onmessage = async (message) => {
-      const payload = parseMessage(message);
-      if (!payload) return;
-      if (payload.type === "cancel") {
-        figma.closePlugin();
-        return;
-      }
-      try {
-        if (payload.type === "loadSpec") {
-          const actions = await loadSpecActions(payload.swaggerUrl);
-          figma.ui.postMessage({ type: "actions", swaggerUrl: payload.swaggerUrl, actions });
-          return;
-        }
-        const input = payload.type === "refresh" ? readSelectedConfig() : payload;
-        if (!input) {
-          throw new Error("Select an OpenAPI Mini Viewer frame before refreshing.");
-        }
-        const replaceNode = payload.type === "refresh" ? selectedEndpointFrame() : void 0;
-        const action = payload.type === "refresh" ? "Refreshed" : "Generated";
-        const card = await generateCard(input, { replaceNode });
-        figma.ui.postMessage({ type: "done", layerName: card.name, action });
-        figma.notify(`${action} ${input.method} ${input.path}`);
-      } catch (error) {
-        const message2 = error instanceof Error ? error.message : "Something went wrong.";
-        figma.ui.postMessage({ type: "error", message: message2 });
-        figma.notify(message2, { error: true });
-      }
-    };
+  async function fetchSpec(swaggerUrl, forceFetch = false) {
+    if (!forceFetch && cachedSpecUrl === swaggerUrl && cachedSpec !== void 0) {
+      return cachedSpec;
+    }
+    const response = await fetch(swaggerUrl);
+    if (!response.ok) {
+      throw new Error(`Unable to fetch OpenAPI document: ${response.status} ${response.statusText}`);
+    }
+    cachedSpec = await response.json();
+    cachedSpecUrl = swaggerUrl;
+    return cachedSpec;
   }
   function parseMessage(message) {
     if (typeof message !== "object" || message === null) return void 0;
@@ -693,10 +703,7 @@
     if (candidate.type === "cancel") return { type: "cancel" };
     if (candidate.type === "refresh") return { type: "refresh" };
     if (candidate.type === "loadSpec" && typeof candidate.swaggerUrl === "string") {
-      return {
-        type: "loadSpec",
-        swaggerUrl: candidate.swaggerUrl
-      };
+      return { type: "loadSpec", swaggerUrl: candidate.swaggerUrl };
     }
     if (candidate.type !== "generate") return void 0;
     if (typeof candidate.swaggerUrl !== "string") return void 0;
@@ -708,75 +715,6 @@
       path: candidate.path,
       method: normalizeMethod(candidate.method)
     };
-  }
-  async function generateCard(input, options = {}) {
-    const spec = await fetchSpec(input.swaggerUrl);
-    const model = buildEndpointViewModel(spec, {
-      swaggerUrl: input.swaggerUrl,
-      path: input.path,
-      method: normalizeMethod(input.method)
-    });
-    await figma.currentPage.loadAsync();
-    const card = await renderEndpointCard(model, options);
-    card.setPluginData(CONFIG_KEY, JSON.stringify(input));
-    card.setRelaunchData({ refresh: "Refresh from Swagger/OpenAPI" });
-    return card;
-  }
-  async function loadSpecActions(swaggerUrl) {
-    const spec = await fetchSpec(swaggerUrl);
-    return extractSwaggerActions(spec);
-  }
-  async function fetchSpec(swaggerUrl) {
-    if (cachedSpec && cachedSpecUrl === swaggerUrl) {
-      return cachedSpec;
-    }
-    const response = await fetch(swaggerUrl);
-    if (!response.ok) {
-      throw new Error(`Unable to fetch OpenAPI document: ${response.status} ${response.statusText}`);
-    }
-    cachedSpec = await response.json();
-    cachedSpecUrl = swaggerUrl;
-    return cachedSpec;
-  }
-  function selectedEndpointFrame() {
-    const selected = figma.currentPage.selection[0];
-    if ((selected == null ? void 0 : selected.type) !== "FRAME") return void 0;
-    return selected.getPluginData(CONFIG_KEY) ? selected : void 0;
-  }
-  function readSelectedConfig() {
-    const frame = selectedEndpointFrame();
-    if (!frame) return void 0;
-    try {
-      const parsed = JSON.parse(frame.getPluginData(CONFIG_KEY));
-      if (typeof parsed.swaggerUrl !== "string") return void 0;
-      if (typeof parsed.path !== "string") return void 0;
-      if (typeof parsed.method !== "string") return void 0;
-      return {
-        swaggerUrl: parsed.swaggerUrl,
-        path: parsed.path,
-        method: normalizeMethod(parsed.method)
-      };
-    } catch (e) {
-      return void 0;
-    }
-  }
-  function postSelectionState() {
-    const config = readSelectedConfig();
-    figma.ui.postMessage({
-      type: "selection",
-      canRefresh: Boolean(config),
-      config
-    });
-  }
-  async function postInitialStateFromVariables() {
-    const config = await readVariableConfig();
-    if (config.swaggerUrl || config.method || config.path) {
-      figma.ui.postMessage({
-        type: "variables",
-        config
-      });
-    }
-    postSelectionState();
   }
   async function readVariableConfig() {
     const variables = await figma.variables.getLocalVariablesAsync("STRING");
@@ -791,10 +729,33 @@
         method = void 0;
       }
     }
+    return { swaggerUrl, method, path };
+  }
+  async function readSavedSwaggerUrl() {
+    const savedValue = await figma.clientStorage.getAsync(LAST_CONFIG_STORAGE_KEY);
+    const savedSwaggerUrl = savedSwaggerUrlFromStorage(savedValue);
+    return (savedSwaggerUrl == null ? void 0 : savedSwaggerUrl.trim()) || void 0;
+  }
+  async function saveSwaggerUrl(swaggerUrl) {
+    await figma.clientStorage.setAsync(LAST_CONFIG_STORAGE_KEY, swaggerUrl);
+  }
+  function savedSwaggerUrlFromStorage(value) {
+    if (typeof value === "string") return value;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
+    const candidate = value;
+    return typeof candidate.swaggerUrl === "string" ? candidate.swaggerUrl : void 0;
+  }
+  function requireRenderableConfig(config) {
+    if (!config.method) {
+      throw new Error("Select a method before generating.");
+    }
+    if (!config.path.trim()) {
+      throw new Error("Enter a path before generating.");
+    }
     return {
-      swaggerUrl,
-      method,
-      path
+      swaggerUrl: config.swaggerUrl,
+      method: config.method,
+      path: config.path
     };
   }
   function variableStringValue(variables, name) {
@@ -803,18 +764,17 @@
     const firstValue = Object.values(variable.valuesByMode).find((value) => typeof value === "string");
     return (firstValue == null ? void 0 : firstValue.trim()) || void 0;
   }
-  async function refreshFromRelaunch() {
-    try {
-      const input = readSelectedConfig();
-      const replaceNode = selectedEndpointFrame();
-      if (!input || !replaceNode) {
-        throw new Error("Select an OpenAPI Mini Viewer frame before refreshing.");
-      }
-      await generateCard(input, { replaceNode });
-      figma.closePlugin(`Refreshed ${input.method} ${input.path}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to refresh OpenAPI card.";
-      figma.closePlugin(message);
-    }
+  function formatUpdatedAt(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const hours = date.getHours();
+    const displayHours = hours % 12 || 12;
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const period = hours >= 12 ? "PM" : "AM";
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const year = date.getFullYear();
+    return `${String(displayHours).padStart(2, "0")}:${minutes}${period} ${month}/${day}/${year}`;
   }
+  widget.register(OpenApiMiniViewerWidget);
 })();

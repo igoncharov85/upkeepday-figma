@@ -3,10 +3,13 @@
     "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "jsx": "react",
+    "jsxFactory": "figma.widget.h",
+    "jsxFragmentFactory": "figma.widget.Fragment",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["@figma/plugin-typings", "node"],
+    "typeRoots": ["./node_modules/@types", "./node_modules/@figma"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "vite.ui.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "vite.ui.config.ts"]
 }

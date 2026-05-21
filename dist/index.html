@@ -192,11 +192,16 @@
       }
 
       .message {
+        display: none;
         min-height: 34px;
         border-radius: 6px;
         padding: 9px 10px;
         color: #596070;
         background: #f3f5f7;
+      }
+
+      .message.visible {
+        display: block;
       }
 
       .message.error {
@@ -205,8 +210,8 @@
       }
 
       .message.done {
-        color: #116b3c;
-        background: #eaf8f0;
+        color: #596070;
+        background: #f3f5f7;
       }
     </style>
   </head>
@@ -227,7 +232,7 @@
       </div>
 
       <div id="searchPanel" class="search-panel">
-        <input id="search" name="search" type="search" placeholder="Search actions..." />
+        <input id="search" name="search" type="search" placeholder="Search actions.." />
         <div id="results" class="results" aria-live="polite"></div>
       </div>
 
@@ -235,7 +240,8 @@
         <label>
           Method
           <select id="method" name="method">
-            <option selected>POST</option>
+            <option value="" selected></option>
+            <option>POST</option>
             <option>GET</option>
             <option>PUT</option>
             <option>DELETE</option>
@@ -244,14 +250,14 @@
 
         <label>
           Path
-          <input id="path" name="path" type="text" value="/student/todos/action" required />
+          <input id="path" name="path" type="text" value="" required />
         </label>
       </div>
 
-      <div id="message" class="message">Fetch a public spec and generate an editable endpoint card.</div>
+      <div id="message" class="message"></div>
 
       <div class="actions">
-        <button class="refresh" type="button" id="refresh" disabled>Refresh selected</button>
+        <button class="refresh" type="button" id="refresh" disabled>Refresh</button>
         <button class="secondary" type="button" id="cancel">Cancel</button>
         <button class="primary" type="submit" id="generate">Generate</button>
       </div>
@@ -275,7 +281,11 @@
 
       function setMessage(text, state) {
         message.textContent = text;
-        message.className = state ? `message ${state}` : "message";
+        message.className = text ? `message visible ${state || ""}` : "message";
+      }
+
+      function clearMessage() {
+        setMessage("");
       }
 
       function setLoading(isLoading) {
@@ -284,7 +294,7 @@
         loadSpec.disabled = isLoading;
         refresh.disabled = isLoading || refresh.dataset.canRefresh !== "true";
         generate.textContent = isLoading ? "Generating..." : "Generate";
-        refresh.textContent = isLoading ? "Refreshing..." : "Refresh selected";
+        refresh.textContent = isLoading ? "Refreshing..." : "Refresh";
         loadSpec.textContent = isLoading ? "Loading..." : "Load";
       }
 
@@ -304,6 +314,14 @@
       function validatePath() {
         if (!path.value.trim().startsWith("/")) {
           return "Path must start with a slash.";
+        }
+
+        return "";
+      }
+
+      function validateMethod() {
+        if (!method.value) {
+          return "Select a method.";
         }
 
         return "";
@@ -357,7 +375,7 @@
         selectedActionKey = actionKey(action);
         method.value = action.method;
         path.value = action.path;
-        setMessage(`Selected ${action.label}.`, "done");
+        clearMessage();
         renderResults();
       }
 
@@ -367,7 +385,7 @@
 
       form.addEventListener("submit", (event) => {
         event.preventDefault();
-        const error = validateUrl() || validatePath();
+        const error = validateUrl() || validateMethod() || validatePath();
 
         if (error) {
           setMessage(error, "error");
@@ -375,7 +393,7 @@
         }
 
         setLoading(true);
-        setMessage("Fetching spec and building Figma layers...");
+        clearMessage();
         parent.postMessage({
           pluginMessage: {
             type: "generate",
@@ -395,7 +413,7 @@
         }
 
         setLoading(true);
-        setMessage("Loading Swagger actions...");
+        clearMessage();
         parent.postMessage({
           pluginMessage: {
             type: "loadSpec",
@@ -412,7 +430,7 @@
 
       refresh.addEventListener("click", () => {
         setLoading(true);
-        setMessage("Refreshing selected endpoint card...");
+        clearMessage();
         parent.postMessage({ pluginMessage: { type: "refresh" } }, "*");
       });
 
@@ -427,7 +445,7 @@
         }
 
         if (pluginMessage.type === "done") {
-          setMessage(`${pluginMessage.action || "Updated"} ${pluginMessage.layerName}.`, "done");
+          clearMessage();
         }
 
         if (pluginMessage.type === "actions") {
@@ -435,8 +453,9 @@
           selectedActionKey = "";
           searchPanel.classList.add("visible");
           search.value = "";
+          search.placeholder = `Search ${actions.length} actions...`;
           renderResults();
-          setMessage(`Loaded ${actions.length} actions. Search and select one, or enter method/path manually.`, "done");
+          clearMessage();
         }
 
         if (pluginMessage.type === "selection") {
@@ -447,7 +466,7 @@
             swaggerUrl.value = pluginMessage.config.swaggerUrl;
             method.value = pluginMessage.config.method;
             path.value = pluginMessage.config.path;
-            setMessage("Selected card can be refreshed.", "done");
+            clearMessage();
           }
         }
 
@@ -464,7 +483,7 @@
             path.value = pluginMessage.config.path;
           }
 
-          setMessage("Loaded values from Figma variables.", "done");
+          clearMessage();
         }
       };
     </script>

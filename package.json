@@ -1,17 +1,18 @@
 {
-  "name": "openapi-mini-viewer-figma-plugin",
+  "name": "openapi-mini-viewer-figma-widget",
   "version": "0.1.0",
   "private": true,
-  "description": "A Figma plugin that renders compact editable Swagger/OpenAPI endpoint cards.",
+  "description": "A Figma widget that renders compact Swagger/OpenAPI endpoint cards.",
   "scripts": {
-    "build": "npm run build:ui && npm run build:main",
+    "build": "npm run build:ui && npm run build:widget",
     "build:ui": "vite build --config vite.ui.config.ts",
-    "build:main": "esbuild src/main.ts --bundle --outfile=dist/main.js --target=es2017 --format=iife",
+    "build:widget": "esbuild src/widget.tsx --bundle --outfile=dist/widget.js --target=es2017 --format=iife --jsx-factory=figma.widget.h --jsx-fragment=figma.widget.Fragment",
     "check": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.117.0",
+    "@figma/widget-typings": "^1.12.1",
     "@types/node": "^22.15.21",
     "esbuild": "^0.25.5",
     "typescript": "^5.8.3",

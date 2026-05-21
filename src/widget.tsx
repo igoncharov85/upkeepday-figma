@@ -1,0 +1,490 @@
+import { buildEndpointViewModel, extractSwaggerActions, normalizeMethod, type EndpointViewModel, type GenerateInput, type HttpMethod, type SwaggerAction } from "./openapi";
+import { jsonToLines, type JsonChunk } from "./widgetJson";
+
+const { widget } = figma;
+const { AutoLayout, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
+
+const DEFAULT_SWAGGER_URL = "https://api.upkeepday.com/swagger.json";
+const LAST_CONFIG_STORAGE_KEY = "openapi-mini-viewer:last-config";
+
+const CARD_WIDTH = 760;
+const CODE_MIN_WIDTH = CARD_WIDTH - 12;
+const CODE_MAX_WIDTH = 1800;
+const CODE_FONT_SIZE = 14;
+const CODE_LINE_HEIGHT = 20;
+const CODE_HORIZONTAL_PADDING = 28;
+const CODE_VERTICAL_PADDING = 24;
+const CODE_CHAR_WIDTH = 8.1;
+
+const COLORS = {
+  borderGreen: "#1ec775",
+  methodGreen: "#4ac987",
+  paleGreen: "#e8f7ef",
+  paleGreenAlt: "#e1f2e9",
+  white: "#ffffff",
+  text: "#353a4b",
+  muted: "#747b87",
+  divider: "#b3bbc2",
+  codeBackground: "#2e2e2e",
+  codeNumber: "#ed6161",
+  codeString: "#8cff99",
+  codeBoolean: "#ffa15c",
+  blue: "#62a6fa",
+  orange: "#f5a83f",
+  red: "#f26057"
+};
+
+type PluginMessage =
+  | { type: "loadSpec"; swaggerUrl: string }
+  | ({ type: "generate" } & GenerateInput)
+  | { type: "refresh" }
+  | { type: "cancel" };
+
+type WidgetConfig = {
+  swaggerUrl: string;
+  method: HttpMethod | "";
+  path: string;
+};
+
+let cachedSpecUrl = "";
+let cachedSpec: unknown;
+
+function OpenApiMiniViewerWidget() {
+  const widgetNodeId = useWidgetNodeId();
+  const [swaggerUrl, setSwaggerUrl] = useSyncedState("swaggerUrl", DEFAULT_SWAGGER_URL);
+  const [method, setMethod] = useSyncedState<HttpMethod | "">("method", "");
+  const [path, setPath] = useSyncedState("path", "");
+  const [model, setModel] = useSyncedState<EndpointViewModel | null>("model", null);
+  const [error, setError] = useSyncedState("error", "");
+  const [loadingMessage, setLoadingMessage] = useSyncedState("loadingMessage", "");
+  const [initialized, setInitialized] = useSyncedState("initialized", false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useSyncedState("lastUpdatedAt", "");
+
+  const config: WidgetConfig = { swaggerUrl, method, path };
+
+  useEffect(() => {
+    if (initialized) return;
+
+    waitForTask((async () => {
+      const savedSwaggerUrl = await readSavedSwaggerUrl();
+      const variableConfig = await readVariableConfig();
+      const nextConfig: WidgetConfig = {
+        swaggerUrl: savedSwaggerUrl ?? variableConfig.swaggerUrl ?? swaggerUrl,
+        method: variableConfig.method ?? "",
+        path: variableConfig.path ?? ""
+      };
+
+      setSwaggerUrl(nextConfig.swaggerUrl);
+      setMethod(nextConfig.method);
+      setPath(nextConfig.path);
+      setInitialized(true);
+      openConfigure(nextConfig, Boolean(model));
+    })());
+  });
+
+  usePropertyMenu([
+    { itemType: "action", propertyName: "configure", tooltip: "Configure" },
+    { itemType: "action", propertyName: "refresh", tooltip: "Refresh" }
+  ], ({ propertyName }) => {
+    if (propertyName === "configure") {
+      openConfigure(config, Boolean(model));
+    }
+
+    if (propertyName === "refresh") {
+      waitForTask(refreshConfig(config));
+    }
+  });
+
+  async function handleLoadSpec(nextSwaggerUrl: string): Promise<void> {
+    setLoadingMessage("Loading Swagger actions...");
+
+    try {
+      const actions = await loadSpecActions(nextSwaggerUrl);
+      postUiMessage({ type: "actions", swaggerUrl: nextSwaggerUrl, actions });
+    } catch (loadError) {
+      postError(loadError);
+    } finally {
+      setLoadingMessage("");
+    }
+  }
+
+  async function applyConfigAndRender(nextConfig: WidgetConfig): Promise<void> {
+    setSwaggerUrl(nextConfig.swaggerUrl);
+    setMethod(nextConfig.method);
+    setPath(nextConfig.path);
+    try {
+      await renderEndpoint(requireRenderableConfig(nextConfig));
+    } catch (renderError) {
+      postError(renderError);
+    }
+  }
+
+  async function refreshConfig(nextConfig: WidgetConfig): Promise<void> {
+    try {
+      await renderEndpoint(requireRenderableConfig(nextConfig), true);
+    } catch (refreshError) {
+      postError(refreshError);
+    }
+  }
+
+  async function renderEndpoint(nextConfig: GenerateInput, forceFetch = false): Promise<void> {
+    setLoadingMessage(forceFetch ? "Refreshing endpoint..." : "Rendering endpoint...");
+
+    try {
+      setError("");
+      const nextModel = await loadEndpoint(nextConfig, forceFetch);
+      setModel(nextModel);
+      await renameWidget(widgetNodeId, endpointCanvasName(nextModel));
+      setLastUpdatedAt(new Date().toISOString());
+      await saveSwaggerUrl(nextConfig.swaggerUrl);
+      postUiMessage({ type: "done", layerName: `${nextModel.method} ${nextModel.path}`, action: forceFetch ? "Refreshed" : "Rendered" });
+    } catch (refreshError) {
+      postError(refreshError);
+    } finally {
+      setLoadingMessage("");
+    }
+  }
+
+  function postError(rawError: unknown): void {
+    const message = rawError instanceof Error ? rawError.message : "Something went wrong.";
+    setError(message);
+    postUiMessage({ type: "error", message });
+  }
+
+  function postUiMessage(message: unknown): void {
+    try {
+      figma.ui.postMessage(message);
+    } catch {
+      // Property menu refreshes can run while the configuration modal is closed.
+    }
+  }
+
+  return (
+    <AutoLayout
+      name={model ? endpointCanvasName(model) : "OpenAPI Mini Viewer Widget"}
+      direction="vertical"
+      width={CARD_WIDTH}
+      padding={0}
+      spacing={0}
+      fill={COLORS.white}
+      stroke={COLORS.borderGreen}
+      strokeWidth={2}
+      overflow="visible"
+    >
+      {model?.tag ? <Title tag={model.tag} /> : null}
+      <Header method={model?.method ?? method} path={model?.path ?? path} />
+      {loadingMessage ? <StatusMessage message={loadingMessage} tone="muted" /> : null}
+      {error ? <StatusMessage message={error} tone="error" /> : null}
+      {!model ? <StatusMessage message="Configure or refresh to render an OpenAPI endpoint." tone="muted" /> : null}
+      {model ? (
+        <>
+          <SectionTitle title="Parameters" />
+          <SectionBody>
+            {model.request ? <CodeBlock json={model.request.exampleJson} /> : <MutedText>No request body parameters.</MutedText>}
+          </SectionBody>
+          <SectionTitle title="Responses" />
+          <SectionBody>
+            <CodeBlock json={model.response.exampleJson} />
+          </SectionBody>
+        </>
+      ) : null}
+      <AutoLayout direction="horizontal" spacing={8} padding={{ top: 8, right: 8, bottom: 8, left: 8 }} fill={COLORS.white} width={CARD_WIDTH} verticalAlignItems="center">
+        <ActionButton label="Configure" onClick={() => openConfigure(config, Boolean(model))} />
+        <ActionButton label="Refresh" onClick={() => waitForTask(refreshConfig(config))} />
+        {lastUpdatedAt ? <Text fontSize={10} fill={COLORS.text}>Updated {formatUpdatedAt(lastUpdatedAt)}</Text> : null}
+      </AutoLayout>
+    </AutoLayout>
+  );
+
+  function openConfigure(currentConfig: WidgetConfig, canRefresh: boolean): void {
+    waitForTask(new Promise<void>((resolve) => {
+      let isClosed = false;
+      let sessionConfig = currentConfig;
+      const closeSession = () => {
+        if (isClosed) return;
+        isClosed = true;
+        resolve();
+      };
+
+      figma.ui.onmessage = (message: unknown) => {
+        let payload: PluginMessage | undefined;
+
+        try {
+          payload = parseMessage(message);
+        } catch (messageError) {
+          postError(messageError);
+          return;
+        }
+
+        if (!payload) return;
+
+        if (payload.type === "cancel") {
+          figma.ui.hide();
+          closeSession();
+          return;
+        }
+
+        if (payload.type === "loadSpec") {
+          waitForTask(handleLoadSpec(payload.swaggerUrl));
+          return;
+        }
+
+        if (payload.type === "refresh") {
+          waitForTask(refreshConfig(sessionConfig));
+          return;
+        }
+
+        sessionConfig = {
+          swaggerUrl: payload.swaggerUrl,
+          method: normalizeMethod(payload.method),
+          path: payload.path
+        };
+        waitForTask(applyConfigAndRender(sessionConfig));
+      };
+
+      figma.showUI(__html__, { width: 380, height: 398, themeColors: true });
+      figma.ui.postMessage({
+        type: "selection",
+        canRefresh,
+        config: currentConfig
+      });
+    }));
+  }
+}
+
+function Title({ tag }: { tag: string }) {
+  return (
+    <AutoLayout width={CARD_WIDTH} height={60} padding={{ left: 10, right: 10 }} verticalAlignItems="center" fill={COLORS.white}>
+      <Text fontSize={34} fontWeight="bold" fill={COLORS.text}>{tag}</Text>
+    </AutoLayout>
+  );
+}
+
+function Header({ method, path }: { method: HttpMethod | ""; path: string }) {
+  return (
+    <AutoLayout width={CARD_WIDTH} height={56} direction="horizontal" spacing={16} padding={{ top: 8, right: 10, bottom: 8, left: 4 }} verticalAlignItems="center" fill={COLORS.paleGreen}>
+      <AutoLayout width={118} height={42} horizontalAlignItems="center" verticalAlignItems="center" cornerRadius={4} fill={methodColor(method)}>
+        <Text fontSize={20} fontWeight="bold" fill={COLORS.white}>{method}</Text>
+      </AutoLayout>
+      <Text width={CARD_WIDTH - 154} fontSize={27} fontWeight="bold" fill={COLORS.text}>{path}</Text>
+    </AutoLayout>
+  );
+}
+
+function SectionTitle({ title }: { title: string }) {
+  return (
+    <AutoLayout width={CARD_WIDTH} padding={{ top: 6, right: 6, bottom: 4, left: 6 }} fill={COLORS.white}>
+      <Text fontSize={20} fontWeight="bold" fill={COLORS.text}>{title}</Text>
+    </AutoLayout>
+  );
+}
+
+function SectionBody({ children }: { children: FigmaDeclarativeNode }) {
+  return (
+    <AutoLayout width={CARD_WIDTH} direction="vertical" padding={{ right: 6, bottom: 6, left: 6 }} spacing={6} fill={COLORS.paleGreenAlt} overflow="visible">
+      {children}
+    </AutoLayout>
+  );
+}
+
+function CodeBlock({ json }: { json: string }) {
+  const width = codeBlockWidth(json);
+  const height = codeBlockHeight(json);
+  const lines = jsonToLines(json);
+
+  return (
+    <AutoLayout width={width} height={height} direction="vertical" padding={{ top: 12, right: 14, bottom: 12, left: 14 }} fill={COLORS.codeBackground} cornerRadius={4} spacing={0}>
+      {lines.map((line, index) => (
+        <Text key={index} width={width - CODE_HORIZONTAL_PADDING} height={CODE_LINE_HEIGHT} fontFamily="Roboto Mono" fontSize={CODE_FONT_SIZE} lineHeight={CODE_LINE_HEIGHT} fill={COLORS.white}>
+          {line.length > 0 ? line.map((chunk, chunkIndex) => <Span key={chunkIndex} fill={chunkColor(chunk)}>{chunk.text}</Span>) : " "}
+        </Text>
+      ))}
+    </AutoLayout>
+  );
+}
+
+function ActionButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <AutoLayout height={30} padding={{ left: 12, right: 12 }} cornerRadius={4} fill={COLORS.paleGreen} stroke={COLORS.borderGreen} strokeWidth={1} verticalAlignItems="center" horizontalAlignItems="center" onClick={onClick}>
+      <Text fontSize={12} fontWeight="bold" fill={COLORS.text}>{label}</Text>
+    </AutoLayout>
+  );
+}
+
+function StatusMessage({ message, tone }: { message: string; tone: "error" | "muted" }) {
+  return (
+    <AutoLayout width={CARD_WIDTH} padding={{ top: 8, right: 8, bottom: 8, left: 8 }} fill={tone === "error" ? "#fff0ef" : COLORS.white}>
+      <Text fontSize={12} fill={tone === "error" ? COLORS.red : COLORS.muted}>{message}</Text>
+    </AutoLayout>
+  );
+}
+
+function MutedText({ children }: { children: string }) {
+  return <Text fontSize={15} fill={COLORS.muted}>{children}</Text>;
+}
+
+function methodColor(method: HttpMethod | ""): string {
+  if (method === "GET") return COLORS.blue;
+  if (method === "DELETE") return COLORS.red;
+  if (method === "PUT") return COLORS.orange;
+  return COLORS.methodGreen;
+}
+
+function chunkColor(chunk: JsonChunk): string {
+  if (chunk.kind === "number") return COLORS.codeNumber;
+  if (chunk.kind === "boolean") return COLORS.codeBoolean;
+  if (chunk.kind === "string") return COLORS.codeString;
+  return COLORS.white;
+}
+
+function codeBlockWidth(json: string): number {
+  const longestLine = json.split("\n").reduce((longest, line) => Math.max(longest, line.length), 0);
+  const estimatedWidth = Math.ceil(longestLine * CODE_CHAR_WIDTH + CODE_HORIZONTAL_PADDING);
+  return Math.min(Math.max(CODE_MIN_WIDTH, estimatedWidth), CODE_MAX_WIDTH);
+}
+
+function codeBlockHeight(json: string): number {
+  const lineCount = Math.max(1, json.split("\n").length);
+  return lineCount * CODE_LINE_HEIGHT + CODE_VERTICAL_PADDING;
+}
+
+async function loadEndpoint(input: GenerateInput, forceFetch = false): Promise<EndpointViewModel> {
+  const spec = await fetchSpec(input.swaggerUrl, forceFetch);
+  return buildEndpointViewModel(spec, input);
+}
+
+async function loadSpecActions(swaggerUrl: string): Promise<SwaggerAction[]> {
+  const spec = await fetchSpec(swaggerUrl, true);
+  return extractSwaggerActions(spec);
+}
+
+async function renameWidget(widgetNodeId: string, name: string): Promise<void> {
+  const node = await figma.getNodeByIdAsync(widgetNodeId);
+  if (node?.type === "WIDGET") {
+    node.name = name;
+  }
+}
+
+function endpointCanvasName(endpoint: Pick<EndpointViewModel, "method" | "path" | "swaggerUrl">): string {
+  return `${endpoint.method} ${endpoint.path} (${swaggerUrlName(endpoint.swaggerUrl)})`;
+}
+
+function swaggerUrlName(swaggerUrl: string): string {
+  return swaggerUrl.replace(/^https?:\/\//i, "");
+}
+
+async function fetchSpec(swaggerUrl: string, forceFetch = false): Promise<unknown> {
+  if (!forceFetch && cachedSpecUrl === swaggerUrl && cachedSpec !== undefined) {
+    return cachedSpec;
+  }
+
+  const response = await fetch(swaggerUrl);
+
+  if (!response.ok) {
+    throw new Error(`Unable to fetch OpenAPI document: ${response.status} ${response.statusText}`);
+  }
+
+  cachedSpec = await response.json();
+  cachedSpecUrl = swaggerUrl;
+  return cachedSpec;
+}
+
+function parseMessage(message: unknown): PluginMessage | undefined {
+  if (typeof message !== "object" || message === null) return undefined;
+  const candidate = message as Record<string, unknown>;
+
+  if (candidate.type === "cancel") return { type: "cancel" };
+  if (candidate.type === "refresh") return { type: "refresh" };
+  if (candidate.type === "loadSpec" && typeof candidate.swaggerUrl === "string") {
+    return { type: "loadSpec", swaggerUrl: candidate.swaggerUrl };
+  }
+
+  if (candidate.type !== "generate") return undefined;
+  if (typeof candidate.swaggerUrl !== "string") return undefined;
+  if (typeof candidate.path !== "string") return undefined;
+  if (typeof candidate.method !== "string") return undefined;
+
+  return {
+    type: "generate",
+    swaggerUrl: candidate.swaggerUrl,
+    path: candidate.path,
+    method: normalizeMethod(candidate.method)
+  };
+}
+
+async function readVariableConfig(): Promise<Partial<GenerateInput>> {
+  const variables = await figma.variables.getLocalVariablesAsync("STRING");
+  const swaggerUrl = variableStringValue(variables, "SwaggerUrl");
+  const methodValue = variableStringValue(variables, "ApiAction");
+  const path = variableStringValue(variables, "ApiPath");
+  let method: HttpMethod | undefined;
+
+  if (methodValue) {
+    try {
+      method = normalizeMethod(methodValue);
+    } catch {
+      method = undefined;
+    }
+  }
+
+  return { swaggerUrl, method, path };
+}
+
+async function readSavedSwaggerUrl(): Promise<string | undefined> {
+  const savedValue = await figma.clientStorage.getAsync(LAST_CONFIG_STORAGE_KEY);
+  const savedSwaggerUrl = savedSwaggerUrlFromStorage(savedValue);
+  return savedSwaggerUrl?.trim() || undefined;
+}
+
+async function saveSwaggerUrl(swaggerUrl: string): Promise<void> {
+  await figma.clientStorage.setAsync(LAST_CONFIG_STORAGE_KEY, swaggerUrl);
+}
+
+function savedSwaggerUrlFromStorage(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.swaggerUrl === "string" ? candidate.swaggerUrl : undefined;
+}
+
+function requireRenderableConfig(config: WidgetConfig): GenerateInput {
+  if (!config.method) {
+    throw new Error("Select a method before generating.");
+  }
+
+  if (!config.path.trim()) {
+    throw new Error("Enter a path before generating.");
+  }
+
+  return {
+    swaggerUrl: config.swaggerUrl,
+    method: config.method,
+    path: config.path
+  };
+}
+
+function variableStringValue(variables: Variable[], name: string): string | undefined {
+  const variable = variables.find((candidate) => candidate.name === name || candidate.name.endsWith(`/${name}`));
+  if (!variable) return undefined;
+
+  const firstValue = Object.values(variable.valuesByMode).find((value): value is string => typeof value === "string");
+  return firstValue?.trim() || undefined;
+}
+
+function formatUpdatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const hours = date.getHours();
+  const displayHours = hours % 12 || 12;
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const period = hours >= 12 ? "PM" : "AM";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getFullYear();
+
+  return `${String(displayHours).padStart(2, "0")}:${minutes}${period} ${month}/${day}/${year}`;
+}
+
+widget.register(OpenApiMiniViewerWidget);
