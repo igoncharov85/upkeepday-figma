@@ -33,7 +33,7 @@
   };
 
   // src/openapi.ts
-  var METHODS = ["get", "post", "put", "delete"];
+  var METHODS = ["get", "post", "put", "delete", "patch", "options", "head", "trace"];
   function normalizeMethod(method) {
     const normalized = method.trim().toUpperCase();
     if (!METHODS.includes(normalized.toLowerCase())) {
@@ -469,12 +469,9 @@
   var { AutoLayout, Image, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
   var DEFAULT_SWAGGER_URL = "https://petstore3.swagger.io/api/v3/openapi.json";
   var LAST_CONFIG_STORAGE_KEY = "openapi-mini-viewer:last-config";
-  var CARD_WIDTH = 760;
-  var CODE_MIN_WIDTH = CARD_WIDTH - 12;
   var CODE_MAX_WIDTH = 1800;
   var RESPONSE_CODE_LABEL_WIDTH = 58;
   var RESPONSE_ROW_GAP = 8;
-  var RESPONSE_CODE_MAX_WIDTH = CARD_WIDTH - 12 - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
   var CODE_FONT_SIZE = 14;
   var CODE_LINE_HEIGHT = 20;
   var CODE_HORIZONTAL_PADDING = 28;
@@ -497,6 +494,11 @@
     orange: "#f5a83f",
     red: "#f26057"
   };
+  var WIDTH_OPTIONS = [
+    { option: "compact", label: "Compact" },
+    { option: "standard", label: "Standard" },
+    { option: "wide", label: "Wide" }
+  ];
   var cachedSpecUrl = "";
   var cachedSpec;
   function OpenApiMiniViewerWidget() {
@@ -511,8 +513,12 @@
     const [loadingMessage, setLoadingMessage] = useSyncedState("loadingMessage", "");
     const [initialized, setInitialized] = useSyncedState("initialized", false);
     const [lastUpdatedAt, setLastUpdatedAt] = useSyncedState("lastUpdatedAt", "");
+    const [widthMode, setWidthMode] = useSyncedState("widthMode", "standard");
     const config = { swaggerUrl, method, path, responseCodes };
     const displayedResponses = (_a = model == null ? void 0 : model.responses) != null ? _a : (model == null ? void 0 : model.response) ? [model.response] : [];
+    const cardWidth = cardWidthForMode(widthMode);
+    const codeMaxWidth = cardWidth - 12;
+    const responseCodeMaxWidth = codeMaxWidth - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
     useEffect(() => {
       if (initialized) return;
       waitForTask((async () => {
@@ -535,24 +541,31 @@
     });
     usePropertyMenu([
       { itemType: "action", propertyName: "configure", tooltip: "Configure" },
-      { itemType: "action", propertyName: "refresh", tooltip: "Refresh" }
-    ], ({ propertyName }) => {
+      { itemType: "action", propertyName: "refresh", tooltip: "Refresh" },
+      {
+        itemType: "dropdown",
+        propertyName: "widthMode",
+        tooltip: "Width",
+        options: WIDTH_OPTIONS,
+        selectedOption: widthMode
+      }
+    ], ({ propertyName, propertyValue }) => {
       if (propertyName === "configure") {
         openConfigure(config, Boolean(model));
       }
       if (propertyName === "refresh") {
         waitForTask(refreshConfig(config));
       }
+      if (propertyName === "widthMode" && isWidthMode(propertyValue)) {
+        setWidthMode(propertyValue);
+      }
     });
     async function handleLoadSpec(nextSwaggerUrl) {
-      setLoadingMessage("Loading Swagger actions...");
       try {
         const actions = await loadSpecActions(nextSwaggerUrl);
         postUiMessage({ type: "actions", swaggerUrl: nextSwaggerUrl, actions });
       } catch (loadError) {
-        postError(loadError);
-      } finally {
-        setLoadingMessage("");
+        postUiMessage({ type: "error", message: errorMessage(loadError) });
       }
     }
     async function applyConfigAndRender(nextConfig) {
@@ -590,7 +603,7 @@
       }
     }
     function postError(rawError) {
-      const message = rawError instanceof Error ? rawError.message : "Something went wrong.";
+      const message = errorMessage(rawError);
       setError(message);
       postUiMessage({ type: "error", message });
     }
@@ -605,7 +618,7 @@
       {
         name: model ? endpointCanvasName(model) : "OpenAPI Mini Viewer Widget",
         direction: "vertical",
-        width: CARD_WIDTH,
+        width: cardWidth,
         padding: 0,
         spacing: 0,
         fill: COLORS.white,
@@ -613,14 +626,14 @@
         strokeWidth: 2,
         overflow: "visible"
       },
-      (model == null ? void 0 : model.tag) ? /* @__PURE__ */ figma.widget.h(Title, { tag: model.tag }) : null,
-      /* @__PURE__ */ figma.widget.h(Header, { method: (_b = model == null ? void 0 : model.method) != null ? _b : method, path: (_c = model == null ? void 0 : model.path) != null ? _c : path }),
-      (model == null ? void 0 : model.description) ? /* @__PURE__ */ figma.widget.h(EndpointDescription, { description: model.description }) : null,
-      loadingMessage ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted" }) : null,
-      error ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: error, tone: "error" }) : null,
-      !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Configure or refresh to render an OpenAPI endpoint.", tone: "muted" }) : null,
-      model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "vertical", spacing: 8, overflow: "visible" }, displayedResponses.map((response) => /* @__PURE__ */ figma.widget.h(ResponseItem, { key: response.code, response }))))) : null,
-      /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: 8, padding: { top: 8, right: 8, bottom: 8, left: 8 }, fill: COLORS.white, width: CARD_WIDTH, verticalAlignItems: "center" }, /* @__PURE__ */ figma.widget.h(Image, { name: "UpKeepDay Icon", src: upkeepday_widget_icon_default, width: 18, height: 18 }), /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Configure", onClick: () => openConfigure(config, Boolean(model)) }), /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Refresh", onClick: () => waitForTask(refreshConfig(config)) }), lastUpdatedAt ? /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, "Updated ", formatUpdatedAt(lastUpdatedAt)) : null)
+      (model == null ? void 0 : model.tag) ? /* @__PURE__ */ figma.widget.h(Title, { tag: model.tag, cardWidth }) : null,
+      /* @__PURE__ */ figma.widget.h(Header, { method: (_b = model == null ? void 0 : model.method) != null ? _b : method, path: (_c = model == null ? void 0 : model.path) != null ? _c : path, cardWidth, widthMode }),
+      (model == null ? void 0 : model.description) ? /* @__PURE__ */ figma.widget.h(EndpointDescription, { description: model.description, cardWidth }) : null,
+      loadingMessage ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted", cardWidth }) : null,
+      error ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: error, tone: "error", cardWidth }) : null,
+      !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Configure or refresh to render an OpenAPI endpoint.", tone: "muted", cardWidth }) : null,
+      model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson, minWidth: codeMaxWidth, maxWidth: codeMaxWidth }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "vertical", spacing: 8, overflow: "visible" }, displayedResponses.map((response) => /* @__PURE__ */ figma.widget.h(ResponseItem, { key: response.code, response, codeMaxWidth: responseCodeMaxWidth }))))) : null,
+      /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: 6, padding: { top: 6, right: 6, bottom: 6, left: 6 }, fill: COLORS.white, width: cardWidth, verticalAlignItems: "center" }, /* @__PURE__ */ figma.widget.h(Image, { name: "UpKeepDay Icon", src: upkeepday_widget_icon_default, width: 16, height: 16 }), /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Configure", onClick: () => openConfigure(config, Boolean(model)) }), /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Refresh", onClick: () => waitForTask(refreshConfig(config)) }), /* @__PURE__ */ figma.widget.h(WidthButton, { mode: widthMode, onClick: () => setWidthMode(nextWidthMode(widthMode)) }), lastUpdatedAt ? /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, formatUpdatedAt(lastUpdatedAt)) : null)
     );
     function openConfigure(currentConfig, canRefresh) {
       waitForTask(new Promise((resolve) => {
@@ -666,44 +679,71 @@
         figma.ui.postMessage({
           type: "selection",
           canRefresh,
-          config: currentConfig
+          config: currentConfig,
+          autoLoadSpec: Boolean(currentConfig.swaggerUrl.trim())
         });
       }));
     }
   }
-  function Title({ tag }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, height: 60, padding: { left: 10, right: 10 }, verticalAlignItems: "center", fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 34, fontWeight: "bold", fill: COLORS.text }, tag));
+  function Title({ tag, cardWidth }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, height: 60, padding: { left: 10, right: 10 }, verticalAlignItems: "center", fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 34, fontWeight: "bold", fill: COLORS.text }, tag));
   }
-  function Header({ method, path }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, height: 56, direction: "horizontal", spacing: 16, padding: { top: 8, right: 10, bottom: 8, left: 4 }, verticalAlignItems: "center", fill: COLORS.paleGreen }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: CARD_WIDTH - 154, fontSize: 27, fontWeight: "bold", fill: COLORS.text }, path));
+  function Header({ method, path, cardWidth, widthMode }) {
+    if (widthMode === "compact") {
+      return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, direction: "vertical", spacing: 8, padding: { top: 8, right: 10, bottom: 10, left: 10 }, fill: COLORS.paleGreen, overflow: "visible" }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: cardWidth - 20, fontSize: 17, lineHeight: 28, fontWeight: "bold", fill: COLORS.text }, path));
+    }
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, height: 56, direction: "horizontal", spacing: 16, padding: { top: 8, right: 10, bottom: 8, left: 4 }, verticalAlignItems: "center", fill: COLORS.paleGreen }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: cardWidth - 154, fontSize: 27, fontWeight: "bold", fill: COLORS.text }, path));
   }
-  function EndpointDescription({ description }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, padding: { top: 22, right: 32, bottom: 22, left: 32 }, fill: COLORS.paleGreen, overflow: "visible" }, /* @__PURE__ */ figma.widget.h(Text, { width: CARD_WIDTH - 64, fontSize: 20, lineHeight: 28, fill: COLORS.text }, description));
+  function EndpointDescription({ description, cardWidth }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, padding: { top: 22, right: 32, bottom: 22, left: 32 }, fill: COLORS.paleGreen, overflow: "visible" }, /* @__PURE__ */ figma.widget.h(Text, { width: cardWidth - 64, fontSize: 20, lineHeight: 28, fill: COLORS.text }, description));
   }
-  function SectionTitle({ title }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, padding: { top: 6, right: 6, bottom: 4, left: 6 }, fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.text }, title));
+  function SectionTitle({ title, cardWidth }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, padding: { top: 6, right: 6, bottom: 4, left: 6 }, fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.text }, title));
   }
-  function SectionBody({ children }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, direction: "vertical", padding: { right: 6, bottom: 6, left: 6 }, spacing: 6, fill: COLORS.paleGreenAlt, overflow: "visible" }, children);
+  function SectionBody({ children, cardWidth }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, direction: "vertical", padding: { right: 6, bottom: 6, left: 6 }, spacing: 6, fill: COLORS.paleGreenAlt, overflow: "visible" }, children);
   }
-  function CodeBlock({ json, maxWidth = CODE_MAX_WIDTH }) {
-    const width = codeBlockWidth(json, maxWidth);
+  function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH }) {
+    const width = codeBlockWidth(json, minWidth, maxWidth);
     const textWidth = width - CODE_HORIZONTAL_PADDING;
     const lines = wrapJsonLines(jsonToLines(json), Math.max(1, Math.floor(textWidth / CODE_CHAR_WIDTH)));
     const height = codeBlockHeight(lines.length);
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width, height, direction: "vertical", padding: { top: 12, right: 14, bottom: 12, left: 14 }, fill: COLORS.codeBackground, cornerRadius: 4, spacing: 0 }, lines.map((line, index) => /* @__PURE__ */ figma.widget.h(Text, { key: index, width: textWidth, height: CODE_LINE_HEIGHT, fontFamily: "Roboto Mono", fontSize: CODE_FONT_SIZE, lineHeight: CODE_LINE_HEIGHT, fill: COLORS.white }, line.length > 0 ? line.map((chunk, chunkIndex) => /* @__PURE__ */ figma.widget.h(Span, { key: chunkIndex, fill: chunkColor(chunk) }, chunk.text)) : " ")));
   }
-  function ResponseItem({ response }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: RESPONSE_ROW_GAP, overflow: "visible", verticalAlignItems: "start" }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: RESPONSE_CODE_LABEL_WIDTH, height: 32, horizontalAlignItems: "center", verticalAlignItems: "center", fill: COLORS.white, stroke: COLORS.divider, strokeWidth: 1, cornerRadius: 4 }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 16, fontWeight: "bold", fill: COLORS.text }, response.code)), /* @__PURE__ */ figma.widget.h(CodeBlock, { json: response.exampleJson, maxWidth: RESPONSE_CODE_MAX_WIDTH }));
+  function ResponseItem({ response, codeMaxWidth }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: RESPONSE_ROW_GAP, overflow: "visible", verticalAlignItems: "start" }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: RESPONSE_CODE_LABEL_WIDTH, height: 32, horizontalAlignItems: "center", verticalAlignItems: "center", fill: COLORS.white, stroke: COLORS.divider, strokeWidth: 1, cornerRadius: 4 }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 16, fontWeight: "bold", fill: COLORS.text }, response.code)), /* @__PURE__ */ figma.widget.h(CodeBlock, { json: response.exampleJson, minWidth: codeMaxWidth, maxWidth: codeMaxWidth }));
   }
   function ActionButton({ label, onClick }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { height: 30, padding: { left: 12, right: 12 }, cornerRadius: 4, fill: COLORS.paleGreen, stroke: COLORS.borderGreen, strokeWidth: 1, verticalAlignItems: "center", horizontalAlignItems: "center", onClick }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 12, fontWeight: "bold", fill: COLORS.text }, label));
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { height: 28, padding: { left: 10, right: 10 }, cornerRadius: 4, fill: COLORS.paleGreen, stroke: COLORS.borderGreen, strokeWidth: 1, verticalAlignItems: "center", horizontalAlignItems: "center", onClick }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 11, fontWeight: "bold", fill: COLORS.text }, label));
   }
-  function StatusMessage({ message, tone }) {
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, padding: { top: 8, right: 8, bottom: 8, left: 8 }, fill: tone === "error" ? "#fff0ef" : COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 12, fill: tone === "error" ? COLORS.red : COLORS.muted }, message));
+  function WidthButton({ mode, onClick }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { height: 28, padding: { left: 8, right: 8 }, cornerRadius: 4, fill: COLORS.white, stroke: COLORS.divider, strokeWidth: 1, verticalAlignItems: "center", horizontalAlignItems: "center", onClick }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 11, fontWeight: "bold", fill: COLORS.text }, widthModeLabel(mode), " v"));
+  }
+  function StatusMessage({ message, tone, cardWidth }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, padding: { top: 8, right: 8, bottom: 8, left: 8 }, fill: tone === "error" ? "#fff0ef" : COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 12, fill: tone === "error" ? COLORS.red : COLORS.muted }, message));
   }
   function MutedText({ children }) {
     return /* @__PURE__ */ figma.widget.h(Text, { fontSize: 15, fill: COLORS.muted }, children);
+  }
+  function cardWidthForMode(mode) {
+    if (mode === "compact") return 400;
+    if (mode === "wide") return 1100;
+    return 750;
+  }
+  function widthModeLabel(mode) {
+    var _a, _b;
+    return (_b = (_a = WIDTH_OPTIONS.find((option) => option.option === mode)) == null ? void 0 : _a.label) != null ? _b : "Standard";
+  }
+  function errorMessage(rawError) {
+    return rawError instanceof Error ? rawError.message : "Something went wrong.";
+  }
+  function nextWidthMode(mode) {
+    if (mode === "compact") return "standard";
+    if (mode === "standard") return "wide";
+    return "compact";
+  }
+  function isWidthMode(value) {
+    return value === "compact" || value === "standard" || value === "wide";
   }
   function methodColor(method) {
     if (method === "GET") return COLORS.blue;
@@ -717,10 +757,10 @@
     if (chunk.kind === "string") return COLORS.codeString;
     return COLORS.white;
   }
-  function codeBlockWidth(json, maxWidth) {
+  function codeBlockWidth(json, minWidth, maxWidth) {
     const longestLine = json.split("\n").reduce((longest, line) => Math.max(longest, line.length), 0);
     const estimatedWidth = Math.ceil(longestLine * CODE_CHAR_WIDTH + CODE_HORIZONTAL_PADDING);
-    return Math.min(Math.max(CODE_MIN_WIDTH, estimatedWidth), maxWidth);
+    return Math.min(Math.max(minWidth, estimatedWidth), maxWidth);
   }
   function codeBlockHeight(lineCount) {
     return lineCount * CODE_LINE_HEIGHT + CODE_VERTICAL_PADDING;

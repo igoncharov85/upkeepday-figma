@@ -134,6 +134,22 @@
         background: #f26057;
       }
 
+      .method-patch {
+        background: #8b6af2;
+      }
+
+      .method-options {
+        background: #5b7a90;
+      }
+
+      .method-head {
+        background: #82715c;
+      }
+
+      .method-trace {
+        background: #a85d7f;
+      }
+
       .result-main {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -286,6 +302,10 @@
             <option>GET</option>
             <option>PUT</option>
             <option>DELETE</option>
+            <option>PATCH</option>
+            <option>OPTIONS</option>
+            <option>HEAD</option>
+            <option>TRACE</option>
           </select>
         </label>
 
@@ -328,6 +348,10 @@
       let selectedActionKey = "";
       let responseCodes = [];
       let selectedResponseCodes = [];
+      let isLoading = false;
+      let generateBlockedUntilActionChange = false;
+      let initialMethod = "";
+      let initialPath = "";
 
       function setMessage(text, state) {
         message.textContent = text;
@@ -338,14 +362,15 @@
         setMessage("");
       }
 
-      function setLoading(isLoading) {
-        generate.disabled = isLoading;
-        cancel.disabled = isLoading;
-        loadSpec.disabled = isLoading;
-        refresh.disabled = isLoading || refresh.dataset.canRefresh !== "true";
-        generate.textContent = isLoading ? "Generating..." : "Generate";
-        refresh.textContent = isLoading ? "Refreshing..." : "Refresh";
-        loadSpec.textContent = isLoading ? "Loading..." : "Load";
+      function setLoading(nextIsLoading) {
+        isLoading = nextIsLoading;
+        updateGenerateState();
+        cancel.disabled = nextIsLoading;
+        loadSpec.disabled = nextIsLoading;
+        refresh.disabled = nextIsLoading || refresh.dataset.canRefresh !== "true";
+        generate.textContent = nextIsLoading ? "Generating..." : "Generate";
+        refresh.textContent = nextIsLoading ? "Refreshing..." : "Refresh";
+        loadSpec.textContent = nextIsLoading ? "Loading..." : "Load";
       }
 
       function validateUrl() {
@@ -383,6 +408,14 @@
         }
 
         return "";
+      }
+
+      function selectedActionChanged() {
+        return method.value !== initialMethod || path.value.trim() !== initialPath;
+      }
+
+      function updateGenerateState() {
+        generate.disabled = isLoading || (generateBlockedUntilActionChange && !selectedActionChanged());
       }
 
       function renderResults() {
@@ -436,6 +469,7 @@
         applyResponseCodes(action.responseCodes);
         clearMessage();
         renderResults();
+        updateGenerateState();
       }
 
       function actionKey(action) {
@@ -453,6 +487,7 @@
         selectedActionKey = action ? actionKey(action) : "";
         applyResponseCodes(action ? action.responseCodes : [], selectedResponseCodes);
         renderResults();
+        updateGenerateState();
       }
 
       function applyResponseCodes(codes, preferredCodes) {
@@ -500,6 +535,7 @@
               }
               selectedResponseCodes = nextCodes;
             }
+            updateGenerateState();
           });
 
           label.appendChild(checkbox);
@@ -510,6 +546,9 @@
 
       form.addEventListener("submit", (event) => {
         event.preventDefault();
+        updateGenerateState();
+        if (generate.disabled) return;
+
         const error = validateUrl() || validateMethod() || validatePath() || validateResponseCodes();
 
         if (error) {
@@ -530,12 +569,12 @@
         }, "*");
       });
 
-      loadSpec.addEventListener("click", () => {
+      function loadCurrentSpec() {
         const error = validateUrl();
 
         if (error) {
           setMessage(error, "error");
-          return;
+          return false;
         }
 
         setLoading(true);
@@ -546,6 +585,11 @@
             swaggerUrl: swaggerUrl.value.trim()
           }
         }, "*");
+        return true;
+      }
+
+      loadSpec.addEventListener("click", () => {
+        loadCurrentSpec();
       });
 
       search.addEventListener("input", renderResults);
@@ -570,10 +614,15 @@
 
         if (pluginMessage.type === "error") {
           setMessage(pluginMessage.message, "error");
+          updateGenerateState();
         }
 
         if (pluginMessage.type === "done") {
+          initialMethod = method.value;
+          initialPath = path.value.trim();
+          generateBlockedUntilActionChange = true;
           clearMessage();
+          updateGenerateState();
         }
 
         if (pluginMessage.type === "actions") {
@@ -586,6 +635,7 @@
           applyResponseCodes(currentAction ? currentAction.responseCodes : [], selectedResponseCodes);
           renderResults();
           clearMessage();
+          updateGenerateState();
         }
 
         if (pluginMessage.type === "selection") {
@@ -596,9 +646,17 @@
             swaggerUrl.value = pluginMessage.config.swaggerUrl;
             method.value = pluginMessage.config.method;
             path.value = pluginMessage.config.path;
+            initialMethod = pluginMessage.canRefresh ? pluginMessage.config.method : "";
+            initialPath = pluginMessage.canRefresh ? pluginMessage.config.path : "";
+            generateBlockedUntilActionChange = Boolean(pluginMessage.canRefresh);
             selectedResponseCodes = pluginMessage.config.responseCodes || [];
             applyResponseCodes([], selectedResponseCodes);
             clearMessage();
+            updateGenerateState();
+          }
+
+          if (pluginMessage.autoLoadSpec) {
+            loadCurrentSpec();
           }
         }
 
@@ -616,6 +674,7 @@
           }
 
           clearMessage();
+          updateGenerateState();
         }
       };
     </script>

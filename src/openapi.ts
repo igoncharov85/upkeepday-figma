@@ -1,4 +1,4 @@
-export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD" | "TRACE";
 
 export type GenerateInput = {
   swaggerUrl: string;
@@ -50,7 +50,7 @@ export type ResponseExample = {
 
 type JsonObject = Record<string, unknown>;
 
-const METHODS = ["get", "post", "put", "delete"] as const;
+const METHODS = ["get", "post", "put", "delete", "patch", "options", "head", "trace"] as const;
 
 export function normalizeMethod(method: string): HttpMethod {
   const normalized = method.trim().toUpperCase();

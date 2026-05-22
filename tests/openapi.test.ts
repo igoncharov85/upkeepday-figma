@@ -85,7 +85,7 @@ describe("extractSwaggerActions", () => {
   it("extracts searchable supported Swagger operations", () => {
     const actions = extractSwaggerActions(swaggerFixture);
 
-    expect(actions).toHaveLength(1);
+    expect(actions).toHaveLength(2);
     expect(actions[0]).toMatchObject({
       method: "POST",
       path: "/student/todos/action",
@@ -98,9 +98,14 @@ describe("extractSwaggerActions", () => {
     expect(actions[0].searchIndex).toContain("/student/todos/action");
     expect(actions[0].searchIndex).toContain("post_action_on_to_do_route");
     expect(actions[0].searchIndex).toContain("student todos");
+    expect(actions[1]).toMatchObject({
+      method: "PATCH",
+      path: "/student/todos/action",
+      operationId: "patch_ignored"
+    });
   });
 
-  it("extracts supported OpenAPI 3 methods and ignores unsupported methods", () => {
+  it("extracts supported OpenAPI 3 methods across all supported verbs", () => {
     const actions = extractSwaggerActions({
       openapi: "3.0.0",
       paths: {
@@ -118,23 +123,43 @@ describe("extractSwaggerActions", () => {
           patch: {
             operationId: "patch_items",
             responses: { "200": { description: "OK" } }
+          },
+          options: {
+            operationId: "options_items",
+            responses: { "200": { description: "OK" } }
+          },
+          head: {
+            operationId: "head_items",
+            responses: { "200": { description: "OK" } }
+          },
+          trace: {
+            operationId: "trace_items",
+            responses: { "200": { description: "OK" } }
           }
         }
       }
     });
 
-    expect(actions.map((action) => action.method)).toEqual(["GET", "DELETE"]);
-    expect(actions.map((action) => action.operationId)).toEqual(["list_items", "delete_items"]);
+    expect(actions.map((action) => action.method)).toEqual(["GET", "DELETE", "PATCH", "OPTIONS", "HEAD", "TRACE"]);
+    expect(actions.map((action) => action.operationId)).toEqual([
+      "list_items",
+      "delete_items",
+      "patch_items",
+      "options_items",
+      "head_items",
+      "trace_items"
+    ]);
   });
 });
 
 describe("normalizeMethod", () => {
   it("normalizes supported methods", () => {
     expect(normalizeMethod("post")).toBe("POST");
+    expect(normalizeMethod("trace")).toBe("TRACE");
   });
 
   it("rejects unsupported methods", () => {
-    expect(() => normalizeMethod("trace")).toThrow("Unsupported HTTP method");
+    expect(() => normalizeMethod("connect")).toThrow("Unsupported HTTP method");
   });
 });
 

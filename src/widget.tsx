@@ -8,12 +8,9 @@ const { AutoLayout, Image, Text, Span, useEffect, usePropertyMenu, useSyncedStat
 const DEFAULT_SWAGGER_URL = "https://petstore3.swagger.io/api/v3/openapi.json";
 const LAST_CONFIG_STORAGE_KEY = "openapi-mini-viewer:last-config";
 
-const CARD_WIDTH = 760;
-const CODE_MIN_WIDTH = CARD_WIDTH - 12;
 const CODE_MAX_WIDTH = 1800;
 const RESPONSE_CODE_LABEL_WIDTH = 58;
 const RESPONSE_ROW_GAP = 8;
-const RESPONSE_CODE_MAX_WIDTH = CARD_WIDTH - 12 - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
 const CODE_FONT_SIZE = 14;
 const CODE_LINE_HEIGHT = 20;
 const CODE_HORIZONTAL_PADDING = 28;
@@ -51,6 +48,14 @@ type WidgetConfig = {
   responseCodes: string[];
 };
 
+type WidthMode = "compact" | "standard" | "wide";
+
+const WIDTH_OPTIONS: Array<{ option: WidthMode; label: string }> = [
+  { option: "compact", label: "Compact" },
+  { option: "standard", label: "Standard" },
+  { option: "wide", label: "Wide" }
+];
+
 let cachedSpecUrl = "";
 let cachedSpec: unknown;
 
@@ -65,9 +70,13 @@ function OpenApiMiniViewerWidget() {
   const [loadingMessage, setLoadingMessage] = useSyncedState("loadingMessage", "");
   const [initialized, setInitialized] = useSyncedState("initialized", false);
   const [lastUpdatedAt, setLastUpdatedAt] = useSyncedState("lastUpdatedAt", "");
+  const [widthMode, setWidthMode] = useSyncedState<WidthMode>("widthMode", "standard");
 
   const config: WidgetConfig = { swaggerUrl, method, path, responseCodes };
   const displayedResponses = model?.responses ?? (model?.response ? [model.response] : []);
+  const cardWidth = cardWidthForMode(widthMode);
+  const codeMaxWidth = cardWidth - 12;
+  const responseCodeMaxWidth = codeMaxWidth - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
 
   useEffect(() => {
     if (initialized) return;
@@ -93,8 +102,15 @@ function OpenApiMiniViewerWidget() {
 
   usePropertyMenu([
     { itemType: "action", propertyName: "configure", tooltip: "Configure" },
-    { itemType: "action", propertyName: "refresh", tooltip: "Refresh" }
-  ], ({ propertyName }) => {
+    { itemType: "action", propertyName: "refresh", tooltip: "Refresh" },
+    {
+      itemType: "dropdown",
+      propertyName: "widthMode",
+      tooltip: "Width",
+      options: WIDTH_OPTIONS,
+      selectedOption: widthMode
+    }
+  ], ({ propertyName, propertyValue }) => {
     if (propertyName === "configure") {
       openConfigure(config, Boolean(model));
     }
@@ -102,18 +118,18 @@ function OpenApiMiniViewerWidget() {
     if (propertyName === "refresh") {
       waitForTask(refreshConfig(config));
     }
+
+    if (propertyName === "widthMode" && isWidthMode(propertyValue)) {
+      setWidthMode(propertyValue);
+    }
   });
 
   async function handleLoadSpec(nextSwaggerUrl: string): Promise<void> {
-    setLoadingMessage("Loading Swagger actions...");
-
     try {
       const actions = await loadSpecActions(nextSwaggerUrl);
       postUiMessage({ type: "actions", swaggerUrl: nextSwaggerUrl, actions });
     } catch (loadError) {
-      postError(loadError);
-    } finally {
-      setLoadingMessage("");
+      postUiMessage({ type: "error", message: errorMessage(loadError) });
     }
   }
 
@@ -156,7 +172,7 @@ function OpenApiMiniViewerWidget() {
   }
 
   function postError(rawError: unknown): void {
-    const message = rawError instanceof Error ? rawError.message : "Something went wrong.";
+    const message = errorMessage(rawError);
     setError(message);
     postUiMessage({ type: "error", message });
   }
@@ -173,7 +189,7 @@ function OpenApiMiniViewerWidget() {
     <AutoLayout
       name={model ? endpointCanvasName(model) : "OpenAPI Mini Viewer Widget"}
       direction="vertical"
-      width={CARD_WIDTH}
+      width={cardWidth}
       padding={0}
       spacing={0}
       fill={COLORS.white}
@@ -181,31 +197,34 @@ function OpenApiMiniViewerWidget() {
       strokeWidth={2}
       overflow="visible"
     >
-      {model?.tag ? <Title tag={model.tag} /> : null}
-      <Header method={model?.method ?? method} path={model?.path ?? path} />
-      {model?.description ? <EndpointDescription description={model.description} /> : null}
-      {loadingMessage ? <StatusMessage message={loadingMessage} tone="muted" /> : null}
-      {error ? <StatusMessage message={error} tone="error" /> : null}
-      {!model ? <StatusMessage message="Configure or refresh to render an OpenAPI endpoint." tone="muted" /> : null}
+      {model?.tag ? <Title tag={model.tag} cardWidth={cardWidth} /> : null}
+      <Header method={model?.method ?? method} path={model?.path ?? path} cardWidth={cardWidth} widthMode={widthMode} />
+      {model?.description ? <EndpointDescription description={model.description} cardWidth={cardWidth} /> : null}
+      {loadingMessage ? <StatusMessage message={loadingMessage} tone="muted" cardWidth={cardWidth} /> : null}
+      {error ? <StatusMessage message={error} tone="error" cardWidth={cardWidth} /> : null}
+      {!model ? <StatusMessage message="Configure or refresh to render an OpenAPI endpoint." tone="muted" cardWidth={cardWidth} /> : null}
       {model ? (
         <>
-          <SectionTitle title="Parameters" />
-          <SectionBody>
-            {model.request ? <CodeBlock json={model.request.exampleJson} /> : <MutedText>No request body parameters.</MutedText>}
+          <SectionTitle title="Parameters" cardWidth={cardWidth} />
+          <SectionBody cardWidth={cardWidth}>
+            {model.request ? <CodeBlock json={model.request.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} /> : <MutedText>No request body parameters.</MutedText>}
           </SectionBody>
-          <SectionTitle title="Responses" />
-          <SectionBody>
+          <SectionTitle title="Responses" cardWidth={cardWidth} />
+          <SectionBody cardWidth={cardWidth}>
             <AutoLayout direction="vertical" spacing={8} overflow="visible">
-              {displayedResponses.map((response) => <ResponseItem key={response.code} response={response} />)}
+              {displayedResponses.map((response) => (
+                <ResponseItem key={response.code} response={response} codeMaxWidth={responseCodeMaxWidth} />
+              ))}
             </AutoLayout>
           </SectionBody>
         </>
       ) : null}
-      <AutoLayout direction="horizontal" spacing={8} padding={{ top: 8, right: 8, bottom: 8, left: 8 }} fill={COLORS.white} width={CARD_WIDTH} verticalAlignItems="center">
-        <Image name="UpKeepDay Icon" src={widgetIcon} width={18} height={18} />
+      <AutoLayout direction="horizontal" spacing={6} padding={{ top: 6, right: 6, bottom: 6, left: 6 }} fill={COLORS.white} width={cardWidth} verticalAlignItems="center">
+        <Image name="UpKeepDay Icon" src={widgetIcon} width={16} height={16} />
         <ActionButton label="Configure" onClick={() => openConfigure(config, Boolean(model))} />
         <ActionButton label="Refresh" onClick={() => waitForTask(refreshConfig(config))} />
-        {lastUpdatedAt ? <Text fontSize={10} fill={COLORS.text}>Updated {formatUpdatedAt(lastUpdatedAt)}</Text> : null}
+        <WidthButton mode={widthMode} onClick={() => setWidthMode(nextWidthMode(widthMode))} />
+        {lastUpdatedAt ? <Text fontSize={10} fill={COLORS.text}>{formatUpdatedAt(lastUpdatedAt)}</Text> : null}
       </AutoLayout>
     </AutoLayout>
   );
@@ -261,57 +280,69 @@ function OpenApiMiniViewerWidget() {
       figma.ui.postMessage({
         type: "selection",
         canRefresh,
-        config: currentConfig
+        config: currentConfig,
+        autoLoadSpec: Boolean(currentConfig.swaggerUrl.trim())
       });
     }));
   }
 }
 
-function Title({ tag }: { tag: string }) {
+function Title({ tag, cardWidth }: { tag: string; cardWidth: number }) {
   return (
-    <AutoLayout width={CARD_WIDTH} height={60} padding={{ left: 10, right: 10 }} verticalAlignItems="center" fill={COLORS.white}>
+    <AutoLayout width={cardWidth} height={60} padding={{ left: 10, right: 10 }} verticalAlignItems="center" fill={COLORS.white}>
       <Text fontSize={34} fontWeight="bold" fill={COLORS.text}>{tag}</Text>
     </AutoLayout>
   );
 }
 
-function Header({ method, path }: { method: HttpMethod | ""; path: string }) {
+function Header({ method, path, cardWidth, widthMode }: { method: HttpMethod | ""; path: string; cardWidth: number; widthMode: WidthMode }) {
+  if (widthMode === "compact") {
+    return (
+      <AutoLayout width={cardWidth} direction="vertical" spacing={8} padding={{ top: 8, right: 10, bottom: 10, left: 10 }} fill={COLORS.paleGreen} overflow="visible">
+        <AutoLayout width={118} height={42} horizontalAlignItems="center" verticalAlignItems="center" cornerRadius={4} fill={methodColor(method)}>
+          <Text fontSize={20} fontWeight="bold" fill={COLORS.white}>{method}</Text>
+        </AutoLayout>
+        <Text width={cardWidth - 20} fontSize={17} lineHeight={28} fontWeight="bold" fill={COLORS.text}>{path}</Text>
+      </AutoLayout>
+    );
+  }
+
   return (
-    <AutoLayout width={CARD_WIDTH} height={56} direction="horizontal" spacing={16} padding={{ top: 8, right: 10, bottom: 8, left: 4 }} verticalAlignItems="center" fill={COLORS.paleGreen}>
+    <AutoLayout width={cardWidth} height={56} direction="horizontal" spacing={16} padding={{ top: 8, right: 10, bottom: 8, left: 4 }} verticalAlignItems="center" fill={COLORS.paleGreen}>
       <AutoLayout width={118} height={42} horizontalAlignItems="center" verticalAlignItems="center" cornerRadius={4} fill={methodColor(method)}>
         <Text fontSize={20} fontWeight="bold" fill={COLORS.white}>{method}</Text>
       </AutoLayout>
-      <Text width={CARD_WIDTH - 154} fontSize={27} fontWeight="bold" fill={COLORS.text}>{path}</Text>
+      <Text width={cardWidth - 154} fontSize={27} fontWeight="bold" fill={COLORS.text}>{path}</Text>
     </AutoLayout>
   );
 }
 
-function EndpointDescription({ description }: { description: string }) {
+function EndpointDescription({ description, cardWidth }: { description: string; cardWidth: number }) {
   return (
-    <AutoLayout width={CARD_WIDTH} padding={{ top: 22, right: 32, bottom: 22, left: 32 }} fill={COLORS.paleGreen} overflow="visible">
-      <Text width={CARD_WIDTH - 64} fontSize={20} lineHeight={28} fill={COLORS.text}>{description}</Text>
+    <AutoLayout width={cardWidth} padding={{ top: 22, right: 32, bottom: 22, left: 32 }} fill={COLORS.paleGreen} overflow="visible">
+      <Text width={cardWidth - 64} fontSize={20} lineHeight={28} fill={COLORS.text}>{description}</Text>
     </AutoLayout>
   );
 }
 
-function SectionTitle({ title }: { title: string }) {
+function SectionTitle({ title, cardWidth }: { title: string; cardWidth: number }) {
   return (
-    <AutoLayout width={CARD_WIDTH} padding={{ top: 6, right: 6, bottom: 4, left: 6 }} fill={COLORS.white}>
+    <AutoLayout width={cardWidth} padding={{ top: 6, right: 6, bottom: 4, left: 6 }} fill={COLORS.white}>
       <Text fontSize={20} fontWeight="bold" fill={COLORS.text}>{title}</Text>
     </AutoLayout>
   );
 }
 
-function SectionBody({ children }: { children: FigmaDeclarativeNode }) {
+function SectionBody({ children, cardWidth }: { children: FigmaDeclarativeNode; cardWidth: number }) {
   return (
-    <AutoLayout width={CARD_WIDTH} direction="vertical" padding={{ right: 6, bottom: 6, left: 6 }} spacing={6} fill={COLORS.paleGreenAlt} overflow="visible">
+    <AutoLayout width={cardWidth} direction="vertical" padding={{ right: 6, bottom: 6, left: 6 }} spacing={6} fill={COLORS.paleGreenAlt} overflow="visible">
       {children}
     </AutoLayout>
   );
 }
 
-function CodeBlock({ json, maxWidth = CODE_MAX_WIDTH }: { json: string; maxWidth?: number }) {
-  const width = codeBlockWidth(json, maxWidth);
+function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH }: { json: string; minWidth: number; maxWidth?: number }) {
+  const width = codeBlockWidth(json, minWidth, maxWidth);
   const textWidth = width - CODE_HORIZONTAL_PADDING;
   const lines = wrapJsonLines(jsonToLines(json), Math.max(1, Math.floor(textWidth / CODE_CHAR_WIDTH)));
   const height = codeBlockHeight(lines.length);
@@ -327,28 +358,36 @@ function CodeBlock({ json, maxWidth = CODE_MAX_WIDTH }: { json: string; maxWidth
   );
 }
 
-function ResponseItem({ response }: { response: EndpointViewModel["responses"][number] }) {
+function ResponseItem({ response, codeMaxWidth }: { response: EndpointViewModel["responses"][number]; codeMaxWidth: number }) {
   return (
     <AutoLayout direction="horizontal" spacing={RESPONSE_ROW_GAP} overflow="visible" verticalAlignItems="start">
       <AutoLayout width={RESPONSE_CODE_LABEL_WIDTH} height={32} horizontalAlignItems="center" verticalAlignItems="center" fill={COLORS.white} stroke={COLORS.divider} strokeWidth={1} cornerRadius={4}>
         <Text fontSize={16} fontWeight="bold" fill={COLORS.text}>{response.code}</Text>
       </AutoLayout>
-      <CodeBlock json={response.exampleJson} maxWidth={RESPONSE_CODE_MAX_WIDTH} />
+      <CodeBlock json={response.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} />
     </AutoLayout>
   );
 }
 
 function ActionButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <AutoLayout height={30} padding={{ left: 12, right: 12 }} cornerRadius={4} fill={COLORS.paleGreen} stroke={COLORS.borderGreen} strokeWidth={1} verticalAlignItems="center" horizontalAlignItems="center" onClick={onClick}>
-      <Text fontSize={12} fontWeight="bold" fill={COLORS.text}>{label}</Text>
+    <AutoLayout height={28} padding={{ left: 10, right: 10 }} cornerRadius={4} fill={COLORS.paleGreen} stroke={COLORS.borderGreen} strokeWidth={1} verticalAlignItems="center" horizontalAlignItems="center" onClick={onClick}>
+      <Text fontSize={11} fontWeight="bold" fill={COLORS.text}>{label}</Text>
     </AutoLayout>
   );
 }
 
-function StatusMessage({ message, tone }: { message: string; tone: "error" | "muted" }) {
+function WidthButton({ mode, onClick }: { mode: WidthMode; onClick: () => void }) {
   return (
-    <AutoLayout width={CARD_WIDTH} padding={{ top: 8, right: 8, bottom: 8, left: 8 }} fill={tone === "error" ? "#fff0ef" : COLORS.white}>
+    <AutoLayout height={28} padding={{ left: 8, right: 8 }} cornerRadius={4} fill={COLORS.white} stroke={COLORS.divider} strokeWidth={1} verticalAlignItems="center" horizontalAlignItems="center" onClick={onClick}>
+      <Text fontSize={11} fontWeight="bold" fill={COLORS.text}>{widthModeLabel(mode)} v</Text>
+    </AutoLayout>
+  );
+}
+
+function StatusMessage({ message, tone, cardWidth }: { message: string; tone: "error" | "muted"; cardWidth: number }) {
+  return (
+    <AutoLayout width={cardWidth} padding={{ top: 8, right: 8, bottom: 8, left: 8 }} fill={tone === "error" ? "#fff0ef" : COLORS.white}>
       <Text fontSize={12} fill={tone === "error" ? COLORS.red : COLORS.muted}>{message}</Text>
     </AutoLayout>
   );
@@ -356,6 +395,30 @@ function StatusMessage({ message, tone }: { message: string; tone: "error" | "mu
 
 function MutedText({ children }: { children: string }) {
   return <Text fontSize={15} fill={COLORS.muted}>{children}</Text>;
+}
+
+function cardWidthForMode(mode: WidthMode): number {
+  if (mode === "compact") return 400;
+  if (mode === "wide") return 1100;
+  return 750;
+}
+
+function widthModeLabel(mode: WidthMode): string {
+  return WIDTH_OPTIONS.find((option) => option.option === mode)?.label ?? "Standard";
+}
+
+function errorMessage(rawError: unknown): string {
+  return rawError instanceof Error ? rawError.message : "Something went wrong.";
+}
+
+function nextWidthMode(mode: WidthMode): WidthMode {
+  if (mode === "compact") return "standard";
+  if (mode === "standard") return "wide";
+  return "compact";
+}
+
+function isWidthMode(value: unknown): value is WidthMode {
+  return value === "compact" || value === "standard" || value === "wide";
 }
 
 function methodColor(method: HttpMethod | ""): string {
@@ -372,10 +435,10 @@ function chunkColor(chunk: JsonChunk): string {
   return COLORS.white;
 }
 
-function codeBlockWidth(json: string, maxWidth: number): number {
+function codeBlockWidth(json: string, minWidth: number, maxWidth: number): number {
   const longestLine = json.split("\n").reduce((longest, line) => Math.max(longest, line.length), 0);
   const estimatedWidth = Math.ceil(longestLine * CODE_CHAR_WIDTH + CODE_HORIZONTAL_PADDING);
-  return Math.min(Math.max(CODE_MIN_WIDTH, estimatedWidth), maxWidth);
+  return Math.min(Math.max(minWidth, estimatedWidth), maxWidth);
 }
 
 function codeBlockHeight(lineCount: number): number {
