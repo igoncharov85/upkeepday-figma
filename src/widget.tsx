@@ -4,6 +4,8 @@ import widgetIcon from "../assets/upkeepday-widget-icon.png";
 import copyIcon from "../assets/copy-alt.png";
 import refreshIcon from "../assets/refresh-icon.png";
 import settingsIcon from "../assets/settings-icon.png";
+import textBlackIcon from "../assets/text-black.png";
+import textWhiteIcon from "../assets/text-white.png";
 import widthChevronIcon from "../assets/width-chevron-icon.png";
 
 const { widget } = figma;
@@ -53,6 +55,7 @@ type WidgetConfig = {
 };
 
 type WidthMode = "compact" | "standard" | "wide";
+type SampleTheme = "dark" | "light";
 
 const WIDTH_OPTIONS: Array<{ option: WidthMode; label: string }> = [
   { option: "compact", label: "Compact" },
@@ -75,6 +78,7 @@ function OpenApiMiniViewerWidget() {
   const [initialized, setInitialized] = useSyncedState("initialized", false);
   const [lastUpdatedAt, setLastUpdatedAt] = useSyncedState("lastUpdatedAt", "");
   const [widthMode, setWidthMode] = useSyncedState<WidthMode>("widthMode", "standard");
+  const [sampleTheme, setSampleTheme] = useSyncedState<SampleTheme>("sampleTheme", "dark");
 
   const config: WidgetConfig = { swaggerUrl, method, path, responseCodes };
   const displayedResponses = model?.responses ?? (model?.response ? [model.response] : []);
@@ -82,6 +86,9 @@ function OpenApiMiniViewerWidget() {
   const codeMaxWidth = cardWidth - 12;
   const responseCodeMaxWidth = codeMaxWidth - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
   const copyablePath = (model?.path ?? path).trim();
+  const nextSampleThemeValue = nextSampleTheme(sampleTheme);
+  const themeToggleIcon = nextSampleThemeValue === "light" ? textBlackIcon : textWhiteIcon;
+  const themeToggleLabel = nextSampleThemeValue === "light" ? "Light Samples" : "Dark Samples";
 
   useEffect(() => {
     if (initialized) return;
@@ -212,13 +219,13 @@ function OpenApiMiniViewerWidget() {
         <>
           <SectionTitle title="Parameters" cardWidth={cardWidth} />
           <SectionBody cardWidth={cardWidth}>
-            {model.request ? <CodeBlock json={model.request.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} /> : <MutedText>No request body parameters.</MutedText>}
+            {model.request ? <CodeBlock json={model.request.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} theme={sampleTheme} /> : <MutedText>No request body parameters.</MutedText>}
           </SectionBody>
           <SectionTitle title="Responses" cardWidth={cardWidth} />
           <SectionBody cardWidth={cardWidth}>
             <AutoLayout direction="vertical" spacing={8} overflow="visible">
               {displayedResponses.map((response) => (
-                <ResponseItem key={response.code} response={response} codeMaxWidth={responseCodeMaxWidth} />
+                <ResponseItem key={response.code} response={response} codeMaxWidth={responseCodeMaxWidth} theme={sampleTheme} />
               ))}
             </AutoLayout>
           </SectionBody>
@@ -229,6 +236,7 @@ function OpenApiMiniViewerWidget() {
         <IconActionButton label="Configure" iconSrc={settingsIcon} onClick={() => openConfigure(config, Boolean(model))} />
         <IconActionButton label="Refresh" iconSrc={refreshIcon} onClick={() => waitForTask(refreshConfig(config))} />
         {copyablePath ? <IconActionButton label="Copy Path" iconSrc={copyIcon} onClick={() => openCopyPathDialog(copyablePath)} /> : null}
+        <IconActionButton label={themeToggleLabel} iconSrc={themeToggleIcon} onClick={() => setSampleTheme(nextSampleThemeValue)} />
         <WidthButton mode={widthMode} onClick={() => setWidthMode(nextWidthMode(widthMode))} />
         {lastUpdatedAt ? <Text fontSize={10} fill={COLORS.text}>{formatUpdatedAt(lastUpdatedAt)}</Text> : null}
       </AutoLayout>
@@ -383,30 +391,31 @@ function SectionBody({ children, cardWidth }: { children: FigmaDeclarativeNode; 
   );
 }
 
-function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH }: { json: string; minWidth: number; maxWidth?: number }) {
+function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH, theme }: { json: string; minWidth: number; maxWidth?: number; theme: SampleTheme }) {
   const width = codeBlockWidth(json, minWidth, maxWidth);
   const textWidth = width - CODE_HORIZONTAL_PADDING;
   const lines = wrapJsonLines(jsonToLines(json), Math.max(1, Math.floor(textWidth / CODE_CHAR_WIDTH)));
   const height = codeBlockHeight(lines.length);
+  const palette = codeTheme(theme);
 
   return (
-    <AutoLayout width={width} height={height} direction="vertical" padding={{ top: 12, right: 14, bottom: 12, left: 14 }} fill={COLORS.codeBackground} cornerRadius={4} spacing={0}>
+    <AutoLayout width={width} height={height} direction="vertical" padding={{ top: 12, right: 14, bottom: 12, left: 14 }} fill={palette.background} stroke={palette.stroke} strokeWidth={palette.strokeWidth} cornerRadius={4} spacing={0}>
       {lines.map((line, index) => (
-        <Text key={index} width={textWidth} height={CODE_LINE_HEIGHT} fontFamily="Roboto Mono" fontSize={CODE_FONT_SIZE} lineHeight={CODE_LINE_HEIGHT} fill={COLORS.white}>
-          {line.length > 0 ? line.map((chunk, chunkIndex) => <Span key={chunkIndex} fill={chunkColor(chunk)}>{chunk.text}</Span>) : " "}
+        <Text key={index} width={textWidth} height={CODE_LINE_HEIGHT} fontFamily="Roboto Mono" fontSize={CODE_FONT_SIZE} lineHeight={CODE_LINE_HEIGHT} fill={palette.baseText}>
+          {line.length > 0 ? line.map((chunk, chunkIndex) => <Span key={chunkIndex} fill={chunkColor(chunk, theme)}>{chunk.text}</Span>) : " "}
         </Text>
       ))}
     </AutoLayout>
   );
 }
 
-function ResponseItem({ response, codeMaxWidth }: { response: EndpointViewModel["responses"][number]; codeMaxWidth: number }) {
+function ResponseItem({ response, codeMaxWidth, theme }: { response: EndpointViewModel["responses"][number]; codeMaxWidth: number; theme: SampleTheme }) {
   return (
     <AutoLayout direction="horizontal" spacing={RESPONSE_ROW_GAP} overflow="visible" verticalAlignItems="start">
       <AutoLayout width={RESPONSE_CODE_LABEL_WIDTH} height={32} horizontalAlignItems="center" verticalAlignItems="center" fill={COLORS.white} stroke={COLORS.divider} strokeWidth={1} cornerRadius={4}>
         <Text fontSize={16} fontWeight="bold" fill={COLORS.text}>{response.code}</Text>
       </AutoLayout>
-      <CodeBlock json={response.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} />
+      <CodeBlock json={response.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} theme={theme} />
     </AutoLayout>
   );
 }
@@ -616,6 +625,10 @@ function nextWidthMode(mode: WidthMode): WidthMode {
   return "compact";
 }
 
+function nextSampleTheme(theme: SampleTheme): SampleTheme {
+  return theme === "dark" ? "light" : "dark";
+}
+
 function isWidthMode(value: unknown): value is WidthMode {
   return value === "compact" || value === "standard" || value === "wide";
 }
@@ -627,11 +640,44 @@ function methodColor(method: HttpMethod | ""): string {
   return COLORS.methodGreen;
 }
 
-function chunkColor(chunk: JsonChunk): string {
-  if (chunk.kind === "number") return COLORS.codeNumber;
-  if (chunk.kind === "boolean") return COLORS.codeBoolean;
-  if (chunk.kind === "string") return COLORS.codeString;
-  return COLORS.white;
+function chunkColor(chunk: JsonChunk, theme: SampleTheme): string {
+  const palette = codeTheme(theme);
+  if (chunk.kind === "number") return palette.number;
+  if (chunk.kind === "boolean") return palette.boolean;
+  if (chunk.kind === "string") return palette.string;
+  return palette.baseText;
+}
+
+function codeTheme(theme: SampleTheme): {
+  background: string;
+  baseText: string;
+  number: string;
+  string: string;
+  boolean: string;
+  stroke: string;
+  strokeWidth: number;
+} {
+  if (theme === "light") {
+    return {
+      background: "#ffffff",
+      baseText: COLORS.text,
+      number: "#d94841",
+      string: "#2f9e44",
+      boolean: "#d97706",
+      stroke: "#c8cbd2",
+      strokeWidth: 1
+    };
+  }
+
+  return {
+    background: COLORS.codeBackground,
+    baseText: COLORS.white,
+    number: COLORS.codeNumber,
+    string: COLORS.codeString,
+    boolean: COLORS.codeBoolean,
+    stroke: COLORS.codeBackground,
+    strokeWidth: 0
+  };
 }
 
 function codeBlockWidth(json: string, minWidth: number, maxWidth: number): number {
