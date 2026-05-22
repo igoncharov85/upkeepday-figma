@@ -57,6 +57,7 @@ type WidgetConfig = {
 
 type WidthMode = "compact" | "standard" | "wide";
 type SampleTheme = "dark" | "light";
+type TypescriptModelTab = "Payload" | "Response";
 
 const WIDTH_OPTIONS: Array<{ option: WidthMode; label: string }> = [
   { option: "compact", label: "Compact" },
@@ -225,15 +226,27 @@ function OpenApiMiniViewerWidget() {
         <>
           <SectionTitle title="Parameters" cardWidth={cardWidth} />
           <SectionBody cardWidth={cardWidth}>
-            {payloadTypescriptModel ? <SectionActionRow width={codeMaxWidth}><IconActionButton label="Payload TypeScript" iconSrc={typescriptIcon} onClick={() => openCopyTypescriptDialog("Payload", payloadTypescriptModel)} /></SectionActionRow> : null}
-            {model.request ? <CodeBlock json={model.request.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} theme={sampleTheme} /> : <MutedText>No request body parameters.</MutedText>}
+            {model.request ? (
+              <CodeBlock
+                json={model.request.exampleJson}
+                minWidth={codeMaxWidth}
+                maxWidth={codeMaxWidth}
+                theme={sampleTheme}
+                action={payloadTypescriptModel ? <CodeIconActionButton label="Payload TypeScript" iconSrc={typescriptIcon} onClick={() => openCopyTypescriptDialog("Payload")} /> : undefined}
+              />
+            ) : <MutedText>No request body parameters.</MutedText>}
           </SectionBody>
           <SectionTitle title="Responses" cardWidth={cardWidth} />
           <SectionBody cardWidth={cardWidth}>
-            {responseTypescriptModel ? <SectionActionRow width={codeMaxWidth}><IconActionButton label="Response TypeScript" iconSrc={typescriptIcon} onClick={() => openCopyTypescriptDialog("Response", responseTypescriptModel)} /></SectionActionRow> : null}
             <AutoLayout direction="vertical" spacing={8} overflow="visible">
-              {displayedResponses.map((response) => (
-                <ResponseItem key={response.code} response={response} codeMaxWidth={responseCodeMaxWidth} theme={sampleTheme} />
+              {displayedResponses.map((response, index) => (
+                <ResponseItem
+                  key={response.code}
+                  response={response}
+                  codeMaxWidth={responseCodeMaxWidth}
+                  theme={sampleTheme}
+                  action={index === 0 && responseTypescriptModel ? <CodeIconActionButton label="Response TypeScript" iconSrc={typescriptIcon} onClick={() => openCopyTypescriptDialog("Response")} /> : undefined}
+                />
               ))}
             </AutoLayout>
           </SectionBody>
@@ -345,7 +358,7 @@ function OpenApiMiniViewerWidget() {
     }));
   }
 
-  function openCopyTypescriptDialog(label: "Payload" | "Response", modelText: string): void {
+  function openCopyTypescriptDialog(activeTab: TypescriptModelTab): void {
     waitForTask(new Promise<void>((resolve) => {
       let isClosed = false;
 
@@ -361,13 +374,14 @@ function OpenApiMiniViewerWidget() {
         const payload = message as Record<string, unknown>;
 
         if (payload.type === "copied") {
-          figma.notify(`${label} TypeScript copied.`);
+          const copiedLabel = payload.label === "Response" ? "Response" : "Payload";
+          figma.notify(`${copiedLabel} TypeScript copied.`);
           closeSession();
           return;
         }
 
         if (payload.type === "copy-error") {
-          figma.notify(typeof payload.message === "string" ? payload.message : `Unable to copy ${label.toLowerCase()} TypeScript.`);
+          figma.notify(typeof payload.message === "string" ? payload.message : "Unable to copy TypeScript.");
           closeSession();
           return;
         }
@@ -377,7 +391,11 @@ function OpenApiMiniViewerWidget() {
         }
       };
 
-      figma.showUI(copyTypescriptDialogHtml(label, modelText), { width: 420, height: 260, themeColors: true });
+      figma.showUI(copyTypescriptDialogHtml({
+        activeTab,
+        payloadModel: payloadTypescriptModel,
+        responseModel: responseTypescriptModel
+      }), { width: 420, height: 296, themeColors: true });
     }));
   }
 }
@@ -436,24 +454,34 @@ function SectionBody({ children, cardWidth }: { children: FigmaDeclarativeNode; 
   );
 }
 
-function SectionActionRow({ children, width }: { children: FigmaDeclarativeNode; width: number }) {
-  return (
-    <AutoLayout width={width} direction="horizontal" horizontalAlignItems="end" verticalAlignItems="center" overflow="visible">
-      {children}
-    </AutoLayout>
-  );
-}
-
-function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH, theme }: { json: string; minWidth: number; maxWidth?: number; theme: SampleTheme }) {
+function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH, theme, action }: { json: string; minWidth: number; maxWidth?: number; theme: SampleTheme; action?: FigmaDeclarativeNode }) {
   const width = codeBlockWidth(json, minWidth, maxWidth);
-  const textWidth = width - CODE_HORIZONTAL_PADDING;
+  const topPadding = action ? 6 : 12;
+  const rightPadding = action ? 6 : 14;
+  const bottomPadding = 12;
+  const leftPadding = 14;
+  const textWidth = width - leftPadding - rightPadding;
   const lines = wrapJsonLines(jsonToLines(json), Math.max(1, Math.floor(textWidth / CODE_CHAR_WIDTH)));
-  const height = codeBlockHeight(lines.length);
+  const firstLineHeight = CODE_LINE_HEIGHT;
+  const remainingLines = action ? lines.slice(1) : lines;
+  const height = action
+    ? topPadding + bottomPadding + firstLineHeight + remainingLines.length * CODE_LINE_HEIGHT
+    : codeBlockHeight(lines.length);
   const palette = codeTheme(theme);
+  const firstLine = lines[0] ?? [];
+  const firstLineTextWidth = action ? Math.max(1, textWidth - 24) : textWidth;
 
   return (
-    <AutoLayout width={width} height={height} direction="vertical" padding={{ top: 12, right: 14, bottom: 12, left: 14 }} fill={palette.background} stroke={palette.stroke} strokeWidth={palette.strokeWidth} cornerRadius={4} spacing={0}>
-      {lines.map((line, index) => (
+    <AutoLayout width={width} height={height} direction="vertical" padding={{ top: topPadding, right: rightPadding, bottom: bottomPadding, left: leftPadding }} fill={palette.background} stroke={palette.stroke} strokeWidth={palette.strokeWidth} cornerRadius={4} spacing={0}>
+      {action ? (
+        <AutoLayout width={textWidth} height={firstLineHeight} direction="horizontal" verticalAlignItems="start" spacing={4} overflow="visible">
+          <Text width={firstLineTextWidth} height={CODE_LINE_HEIGHT} fontFamily="Roboto Mono" fontSize={CODE_FONT_SIZE} lineHeight={CODE_LINE_HEIGHT} fill={palette.baseText}>
+            {firstLine.length > 0 ? firstLine.map((chunk, chunkIndex) => <Span key={chunkIndex} fill={chunkColor(chunk, theme)}>{chunk.text}</Span>) : " "}
+          </Text>
+          {action}
+        </AutoLayout>
+      ) : null}
+      {remainingLines.map((line, index) => (
         <Text key={index} width={textWidth} height={CODE_LINE_HEIGHT} fontFamily="Roboto Mono" fontSize={CODE_FONT_SIZE} lineHeight={CODE_LINE_HEIGHT} fill={palette.baseText}>
           {line.length > 0 ? line.map((chunk, chunkIndex) => <Span key={chunkIndex} fill={chunkColor(chunk, theme)}>{chunk.text}</Span>) : " "}
         </Text>
@@ -462,13 +490,13 @@ function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH, theme }: { json:
   );
 }
 
-function ResponseItem({ response, codeMaxWidth, theme }: { response: EndpointViewModel["responses"][number]; codeMaxWidth: number; theme: SampleTheme }) {
+function ResponseItem({ response, codeMaxWidth, theme, action }: { response: EndpointViewModel["responses"][number]; codeMaxWidth: number; theme: SampleTheme; action?: FigmaDeclarativeNode }) {
   return (
     <AutoLayout direction="horizontal" spacing={RESPONSE_ROW_GAP} overflow="visible" verticalAlignItems="start">
       <AutoLayout width={RESPONSE_CODE_LABEL_WIDTH} height={32} horizontalAlignItems="center" verticalAlignItems="center" fill={COLORS.white} stroke={COLORS.divider} strokeWidth={1} cornerRadius={4}>
         <Text fontSize={16} fontWeight="bold" fill={COLORS.text}>{response.code}</Text>
       </AutoLayout>
-      <CodeBlock json={response.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} theme={theme} />
+      <CodeBlock json={response.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} theme={theme} action={action} />
     </AutoLayout>
   );
 }
@@ -488,6 +516,24 @@ function IconActionButton({ label, iconSrc, onClick }: { label: string; iconSrc:
       onClick={onClick}
     >
       <Image name={label} src={iconSrc} width={14} height={14} />
+    </AutoLayout>
+  );
+}
+
+function CodeIconActionButton({ label, iconSrc, onClick }: { label: string; iconSrc: string; onClick: () => void }) {
+  return (
+    <AutoLayout
+      name={label}
+      width={20}
+      height={20}
+      cornerRadius={4}
+      stroke={COLORS.borderGreen}
+      strokeWidth={1}
+      verticalAlignItems="center"
+      horizontalAlignItems="center"
+      onClick={onClick}
+    >
+      <Image name={label} src={iconSrc} width={20} height={20} />
     </AutoLayout>
   );
 }
@@ -667,8 +713,12 @@ function copyPathDialogHtml(pathToCopy: string): string {
 </html>`;
 }
 
-function copyTypescriptDialogHtml(label: "Payload" | "Response", modelText: string): string {
-  const modelJson = JSON.stringify(modelText);
+function copyTypescriptDialogHtml({ activeTab, payloadModel, responseModel }: { activeTab: TypescriptModelTab; payloadModel?: string; responseModel?: string }): string {
+  const modelsJson = JSON.stringify({
+    Payload: payloadModel ?? "",
+    Response: responseModel ?? ""
+  });
+  const activeTabJson = JSON.stringify(activeTab);
   const iconJson = JSON.stringify(typescriptIcon);
   const closeIconJson = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAMxJREFUeAHFlcsNwjAMhu1MkjE4wo0RuHayXhmBWzkyRjYJNglSBUlr17VqqVJru9+fp42n6y1mzCNmHF6Pe4IdbM4MQC/kO5Nj4gAYrcKnyhwDkAp9JHqiVWQGj8zkGWAncNEuV4+BawkWOMdQmrgF/iegFZHk4tYfpQNpCqwBNLPsCvRA7Nfs06JAS6S6RXCRQEMEQHGMAzjbsUvkusmux9T1ormWCtdi51quXRvOHvAlkW/TN8PZPiMudyVB6fGl6SPg0wr/FanM4Q2232Ehuj7+RgAAAABJRU5ErkJggg==";
   return `<!doctype html>
@@ -692,12 +742,25 @@ function copyTypescriptDialogHtml(label: "Payload" | "Response", modelText: stri
         display: grid;
         gap: 10px;
       }
-      .title {
-        font-size: 13px;
-        font-weight: 700;
+      .tabs {
+        display: flex;
+        gap: 6px;
+      }
+      .tab {
+        height: 30px;
+        border-color: #c8cbd2;
+        background: #ffffff;
+        font-size: 12px;
+      }
+      .tab.active {
+        border-color: #18a058;
+        background: #e8f7ef;
+      }
+      .tab:disabled {
+        opacity: 0.45;
       }
       pre {
-        height: 146px;
+        height: 161px;
         margin: 0;
         overflow: auto;
         border: 1px solid #c8cbd2;
@@ -745,15 +808,42 @@ function copyTypescriptDialogHtml(label: "Payload" | "Response", modelText: stri
   </head>
   <body>
     <div class="layout">
-      <div class="title">${escapeHtml(label)} TypeScript model</div>
-      <pre>${escapeHtml(modelText)}</pre>
+      <div class="tabs">
+        <button class="tab" type="button" id="payloadTab">Payload Model</button>
+        <button class="tab" type="button" id="responseTab">Response Model</button>
+      </div>
+      <pre id="preview"></pre>
       <div class="actions">
         <button class="copy-button" type="button" id="copy">Copy <img src=${iconJson} alt="" /></button>
         <button class="cancel close-button" type="button" id="cancel">Close <img src=${closeIconJson} alt="" /></button>
       </div>
     </div>
     <script>
-      const value = ${modelJson};
+      const models = ${modelsJson};
+      let activeTab = ${activeTabJson};
+      const preview = document.getElementById("preview");
+      const payloadTab = document.getElementById("payloadTab");
+      const responseTab = document.getElementById("responseTab");
+      const copyButton = document.getElementById("copy");
+
+      function modelFor(tab) {
+        return models[tab] || "";
+      }
+
+      function renderTab() {
+        if (!modelFor(activeTab)) {
+          activeTab = modelFor("Payload") ? "Payload" : "Response";
+        }
+
+        const activeModel = modelFor(activeTab);
+        preview.textContent = activeModel || "No TypeScript model available.";
+        payloadTab.classList.toggle("active", activeTab === "Payload");
+        responseTab.classList.toggle("active", activeTab === "Response");
+        payloadTab.disabled = !modelFor("Payload");
+        responseTab.disabled = !modelFor("Response");
+        copyButton.disabled = !activeModel;
+      }
+
       async function copyText(text) {
         if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
           await navigator.clipboard.writeText(text);
@@ -778,10 +868,18 @@ function copyTypescriptDialogHtml(label: "Payload" | "Response", modelText: stri
           document.body.removeChild(textarea);
         }
       }
-      document.getElementById("copy").addEventListener("click", async () => {
+      payloadTab.addEventListener("click", () => {
+        activeTab = "Payload";
+        renderTab();
+      });
+      responseTab.addEventListener("click", () => {
+        activeTab = "Response";
+        renderTab();
+      });
+      copyButton.addEventListener("click", async () => {
         try {
-          await copyText(value);
-          parent.postMessage({ pluginMessage: { type: "copied" } }, "*");
+          await copyText(modelFor(activeTab));
+          parent.postMessage({ pluginMessage: { type: "copied", label: activeTab } }, "*");
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unable to copy TypeScript model.";
           parent.postMessage({ pluginMessage: { type: "copy-error", message } }, "*");
@@ -790,6 +888,7 @@ function copyTypescriptDialogHtml(label: "Payload" | "Response", modelText: stri
       document.getElementById("cancel").addEventListener("click", () => {
         parent.postMessage({ pluginMessage: { type: "close" } }, "*");
       });
+      renderTab();
     </script>
   </body>
 </html>`;
