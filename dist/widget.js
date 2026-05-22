@@ -52,8 +52,9 @@
     if (!operation) {
       throw new Error(`${input.method} is not defined for "${input.path}".`);
     }
-    const request = extractRequestExample(root, pathItem, operation);
-    const responses = extractResponseExamples(root, operation, input.responseCodes);
+    const baseTypeName = endpointTypeName(operation, input);
+    const request = extractRequestExample(root, pathItem, operation, baseTypeName);
+    const responses = extractResponseExamples(root, operation, input.responseCodes, baseTypeName);
     return {
       swaggerUrl: input.swaggerUrl,
       method: input.method,
@@ -63,7 +64,8 @@
       description: asString(operation.description),
       request,
       responses,
-      response: responses[0]
+      response: responses[0],
+      responseTypescriptModel: responseTypescriptModel(baseTypeName, responses)
     };
   }
   function extractSwaggerActions(spec) {
@@ -104,7 +106,7 @@
       });
     });
   }
-  function extractRequestExample(root, pathItem, operation) {
+  function extractRequestExample(root, pathItem, operation, baseTypeName) {
     var _a, _b, _c, _d;
     const openApiBody = asOptionalObject(operation.requestBody);
     if (openApiBody) {
@@ -119,7 +121,8 @@
         typeLabel: schemaTypeLabel(root, schema2),
         contentType: chosen.contentType,
         example: example2,
-        exampleJson: stringifyExample(example2)
+        exampleJson: stringifyExample(example2),
+        typescriptModel: schema2 ? typescriptDeclarationFromSchema(root, schema2, `${baseTypeName}Payload`) : void 0
       };
     }
     const parameters = [
@@ -137,17 +140,18 @@
       typeLabel: schemaTypeLabel(root, schema),
       contentType,
       example,
-      exampleJson: stringifyExample(example)
+      exampleJson: stringifyExample(example),
+      typescriptModel: schema ? typescriptDeclarationFromSchema(root, schema, `${baseTypeName}Payload`) : void 0
     };
   }
   function extractResponseCodes(operation) {
     const responses = asOptionalObject(operation.responses);
     return responses ? sortedResponseCodes(Object.keys(responses)) : [];
   }
-  function extractResponseExamples(root, operation, selectedCodes) {
+  function extractResponseExamples(root, operation, selectedCodes, baseTypeName) {
     const responses = asObject(operation.responses, "responses");
     const codes = chooseResponseCodes(responses, selectedCodes);
-    return codes.map((code) => extractResponseExample(root, operation, responses, code));
+    return codes.map((code) => extractResponseExample(root, operation, responses, code, baseTypeName));
   }
   function chooseResponseCodes(responses, selectedCodes) {
     const availableCodes = sortedResponseCodes(Object.keys(responses));
@@ -167,12 +171,13 @@
     }
     return [availableCodes.includes("200") ? "200" : availableCodes[0]];
   }
-  function extractResponseExample(root, operation, responses, code) {
+  function extractResponseExample(root, operation, responses, code, baseTypeName) {
     var _a, _b, _c, _d, _e;
     const responseObject = asObject(responses[code], `response ${code}`);
     const response = asObject(resolveMaybeRef(root, responseObject), `response ${code}`);
     const content = asOptionalObject(response.content);
     const chosen = chooseContent(content);
+    const typeName = `${baseTypeName}${responseCodeTypePart(code)}Response`;
     if (chosen) {
       const schema2 = asOptionalObject(chosen.media.schema);
       const example2 = (_a = chooseExplicitExample(chosen.media)) != null ? _a : schema2 ? exampleFromSchema(root, schema2) : {};
@@ -181,7 +186,8 @@
         description: (_b = asString(response.description)) != null ? _b : "Success",
         contentType: chosen.contentType,
         example: example2,
-        exampleJson: stringifyExample(example2)
+        exampleJson: stringifyExample(example2),
+        typescriptModel: schema2 ? typescriptDeclarationFromSchema(root, schema2, typeName) : void 0
       };
     }
     const schema = asOptionalObject(response.schema);
@@ -192,7 +198,8 @@
       description: (_e = asString(response.description)) != null ? _e : "Success",
       contentType,
       example,
-      exampleJson: stringifyExample(example)
+      exampleJson: stringifyExample(example),
+      typescriptModel: schema ? typescriptDeclarationFromSchema(root, schema, typeName) : void 0
     };
   }
   function sortedResponseCodes(codes) {
@@ -204,6 +211,162 @@
       if (rightIsNumeric) return 1;
       return left.localeCompare(right);
     });
+  }
+  function endpointTypeName(operation, input) {
+    const operationId = asString(operation.operationId);
+    if (operationId) return toPascalCase(operationId) || "Endpoint";
+    return toPascalCase(`${input.method} ${input.path.replace(/[{}]/g, " ")}`) || "Endpoint";
+  }
+  function responseTypescriptModel(baseTypeName, responses) {
+    const models = responses.map((response) => response.typescriptModel).filter((model) => Boolean(model));
+    if (models.length === 0) return void 0;
+    const responseTypeNames = responses.filter((response) => response.typescriptModel).map((response) => `${baseTypeName}${responseCodeTypePart(response.code)}Response`);
+    if (responseTypeNames.length <= 1) return models.join("\n\n");
+    return [
+      ...models,
+      `type ${baseTypeName}Response = ${responseTypeNames.join(" | ")};`
+    ].join("\n\n");
+  }
+  function typescriptDeclarationFromSchema(root, schema, typeName) {
+    const resolved = mergeRef(root, schema);
+    const type = typescriptType(root, resolved, 0, /* @__PURE__ */ new Set());
+    if (type.kind === "object") {
+      return `interface ${typeName} ${type.value}`;
+    }
+    return `type ${typeName} = ${type.value};`;
+  }
+  function typescriptType(root, schema, depth, seen) {
+    if (depth > 12) return { kind: "type", value: "unknown" };
+    const current = asOptionalObject(schema);
+    if (!current) return { kind: "type", value: "unknown" };
+    const ref = asString(current.$ref);
+    if (ref) {
+      if (seen.has(ref)) return { kind: "type", value: "unknown" };
+      const nextSeen = new Set(seen);
+      nextSeen.add(ref);
+      return typescriptType(root, mergeRef(root, current), depth + 1, nextSeen);
+    }
+    const enumType = typescriptEnumType(current);
+    if (enumType) return withNullable(current, { kind: "type", value: enumType });
+    const allOf = asArray(current.allOf).map(asOptionalObject).filter(Boolean);
+    if (allOf.length > 0) {
+      const merged = mergeObjectSchemas(allOf.map((item) => mergeRef(root, item)));
+      if (merged) return withNullable(current, typescriptType(root, merged, depth + 1, seen));
+      const parts = allOf.map((item) => parenthesizedType(typescriptType(root, item, depth + 1, seen).value));
+      return withNullable(current, { kind: "type", value: parts.join(" & ") || "unknown" });
+    }
+    const variants = asArray(current.oneOf).length > 0 ? asArray(current.oneOf) : asArray(current.anyOf);
+    if (variants.length > 0) {
+      const parts = variants.map((item) => typescriptType(root, item, depth + 1, seen).value);
+      return withNullable(current, { kind: "type", value: unique(parts).join(" | ") || "unknown" });
+    }
+    const type = normalizedType(current);
+    if (type === "array") {
+      const itemType = typescriptType(root, current.items, depth + 1, seen).value;
+      return withNullable(current, { kind: "type", value: `${parenthesizedArrayType(itemType)}[]` });
+    }
+    if (type === "object" || current.properties || current.additionalProperties) {
+      return withNullable(current, typescriptObjectType(root, current, depth, seen));
+    }
+    if (type === "integer" || type === "number") return withNullable(current, { kind: "type", value: "number" });
+    if (type === "boolean") return withNullable(current, { kind: "type", value: "boolean" });
+    if (type === "string") return withNullable(current, { kind: "type", value: "string" });
+    return withNullable(current, { kind: "type", value: "unknown" });
+  }
+  function typescriptObjectType(root, schema, depth, seen) {
+    const properties = asOptionalObject(schema.properties);
+    const required = new Set(asArray(schema.required).filter((item) => typeof item === "string"));
+    const lines = [];
+    if (properties) {
+      for (const [propertyName, propertySchema] of Object.entries(properties)) {
+        const optional = required.has(propertyName) ? "" : "?";
+        const propertyType = typescriptType(root, propertySchema, depth + 1, new Set(seen)).value;
+        lines.push(`${indent(1)}${typescriptPropertyName(propertyName)}${optional}: ${propertyType};`);
+      }
+    }
+    const additionalProperties = schema.additionalProperties;
+    if (isPlainObject(additionalProperties)) {
+      const additionalType = typescriptType(root, additionalProperties, depth + 1, seen).value;
+      lines.push(`${indent(1)}[key: string]: ${additionalType};`);
+    } else if (additionalProperties === true && lines.length === 0) {
+      lines.push(`${indent(1)}[key: string]: unknown;`);
+    }
+    if (lines.length === 0) return { kind: "object", value: "{\n  [key: string]: unknown;\n}" };
+    return { kind: "object", value: `{
+${lines.join("\n")}
+}` };
+  }
+  function typescriptEnumType(schema) {
+    if (!Array.isArray(schema.enum) || schema.enum.length === 0) return void 0;
+    return unique(schema.enum.map((item) => {
+      if (typeof item === "string") return JSON.stringify(item);
+      if (typeof item === "number" || typeof item === "boolean") return String(item);
+      if (item === null) return "null";
+      return "unknown";
+    })).join(" | ");
+  }
+  function withNullable(schema, type) {
+    if (!isNullableSchema(schema) || type.value.includes("null")) return type;
+    return {
+      kind: "type",
+      value: `${type.value} | null`
+    };
+  }
+  function isNullableSchema(schema) {
+    return schema.nullable === true || Array.isArray(schema.type) && schema.type.includes("null");
+  }
+  function mergeRef(root, schema) {
+    const ref = asString(schema.$ref);
+    if (!ref) return schema;
+    return __spreadValues(__spreadValues({}, asOptionalObject(resolveRef(root, ref))), withoutRef(schema));
+  }
+  function mergeObjectSchemas(schemas) {
+    var _a;
+    const merged = { type: "object", properties: {}, required: [] };
+    const mergedProperties = asObject(merged.properties, "merged properties");
+    const mergedRequired = [];
+    for (const schema of schemas) {
+      const current = asOptionalObject(schema);
+      if (!current || !current.properties && normalizedType(current) !== "object") return void 0;
+      Object.assign(mergedProperties, (_a = asOptionalObject(current.properties)) != null ? _a : {});
+      mergedRequired.push(...asArray(current.required).filter((item) => typeof item === "string"));
+      if (current.additionalProperties !== void 0) {
+        merged.additionalProperties = current.additionalProperties;
+      }
+    }
+    merged.required = unique(mergedRequired);
+    return merged;
+  }
+  function toPascalCase(value) {
+    const words = value.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^a-zA-Z0-9]+/).filter(Boolean);
+    const result = words.map((word) => {
+      const normalized = word.toLowerCase();
+      return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    }).join("");
+    return /^[0-9]/.test(result) ? `Model${result}` : result;
+  }
+  function responseCodeTypePart(code) {
+    const words = code.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+    const result = words.map((word) => {
+      const normalized = word.toLowerCase();
+      return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    }).join("");
+    return result || "Default";
+  }
+  function typescriptPropertyName(name) {
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
+  }
+  function parenthesizedArrayType(value) {
+    return value.includes(" | ") || value.includes(" & ") ? `(${value})` : value;
+  }
+  function parenthesizedType(value) {
+    return value.startsWith("{") && value.endsWith("}") ? `(${value})` : value;
+  }
+  function indent(level) {
+    return "  ".repeat(level);
+  }
+  function unique(items) {
+    return [...new Set(items)];
   }
   function exampleFromSchema(root, schema, depth = 0, seen = /* @__PURE__ */ new Set()) {
     var _a, _b;
@@ -479,6 +642,9 @@
   // assets/text-white.png
   var text_white_default = "data:image/png;base64,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";
 
+  // assets/typescript-icon.png
+  var typescript_icon_default = "data:image/png;base64,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";
+
   // assets/width-chevron-icon.png
   var width_chevron_icon_default = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAOxJREFUeAHtky0PwjAQQO8KZOAwCNwMCjNDggQHKHAExy/iJ2BBgcQNiZycnEROsoVxXEMIS/bRbkPuue2a99omBaipqQqOFhtL0HOPJFa3y8GDPzCerU3C16mBza0QFO24YxGSLQdQkY+cbOmM2C0CI1gBgsMzs2rkJwcTgJwOu1EOrOWya4SGDQQWf3pIOC16XUl5OL2ezz5+F1SJZMnlDOMLy0Ty5IlA0YhKnhrQjejIMwOqiK48N5AVkf915cpASoTl4CNBV0cuaagCd9d99IaDYytq9WWPd9RGwCs/orlKXooJnwhqauK8AYB9wf3sJo6MAAAAAElFTkSuQmCC";
 
@@ -520,7 +686,7 @@
   var cachedSpecUrl = "";
   var cachedSpec;
   function OpenApiMiniViewerWidget() {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     const widgetNodeId = useWidgetNodeId();
     const [swaggerUrl, setSwaggerUrl] = useSyncedState("swaggerUrl", DEFAULT_SWAGGER_URL);
     const [method, setMethod] = useSyncedState("method", "");
@@ -545,6 +711,8 @@
     const themeToggleIcon = nextSampleThemeValue === "light" ? text_black_default : text_white_default;
     const themeToggleLabel = nextSampleThemeValue === "light" ? "Light Samples" : "Dark Samples";
     const refreshStatusText = loadingMessage === "Refreshing endpoint..." && activeMethod && activePath ? `Refreshing: ${activeMethod} ${activePath}` : "";
+    const payloadTypescriptModel = (_e = model == null ? void 0 : model.request) == null ? void 0 : _e.typescriptModel;
+    const responseTypescriptModel2 = model == null ? void 0 : model.responseTypescriptModel;
     useEffect(() => {
       if (initialized) return;
       waitForTask((async () => {
@@ -653,12 +821,12 @@
         overflow: "visible"
       },
       (model == null ? void 0 : model.tag) ? /* @__PURE__ */ figma.widget.h(Title, { tag: model.tag, cardWidth }) : null,
-      /* @__PURE__ */ figma.widget.h(Header, { method: (_e = model == null ? void 0 : model.method) != null ? _e : method, path: (_f = model == null ? void 0 : model.path) != null ? _f : path, cardWidth, widthMode }),
+      /* @__PURE__ */ figma.widget.h(Header, { method: (_f = model == null ? void 0 : model.method) != null ? _f : method, path: (_g = model == null ? void 0 : model.path) != null ? _g : path, cardWidth, widthMode }),
       (model == null ? void 0 : model.description) ? /* @__PURE__ */ figma.widget.h(EndpointDescription, { description: model.description, cardWidth }) : null,
       loadingMessage && !refreshStatusText ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted", cardWidth }) : null,
       error ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: error, tone: "error", cardWidth }) : null,
       !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Configure or refresh to render an OpenAPI endpoint.", tone: "muted", cardWidth }) : null,
-      model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson, minWidth: codeMaxWidth, maxWidth: codeMaxWidth, theme: sampleTheme }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "vertical", spacing: 8, overflow: "visible" }, displayedResponses.map((response) => /* @__PURE__ */ figma.widget.h(ResponseItem, { key: response.code, response, codeMaxWidth: responseCodeMaxWidth, theme: sampleTheme }))))) : null,
+      model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, payloadTypescriptModel ? /* @__PURE__ */ figma.widget.h(SectionActionRow, { width: codeMaxWidth }, /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Payload TypeScript", iconSrc: typescript_icon_default, onClick: () => openCopyTypescriptDialog("Payload", payloadTypescriptModel) })) : null, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson, minWidth: codeMaxWidth, maxWidth: codeMaxWidth, theme: sampleTheme }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, responseTypescriptModel2 ? /* @__PURE__ */ figma.widget.h(SectionActionRow, { width: codeMaxWidth }, /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Response TypeScript", iconSrc: typescript_icon_default, onClick: () => openCopyTypescriptDialog("Response", responseTypescriptModel2) })) : null, /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "vertical", spacing: 8, overflow: "visible" }, displayedResponses.map((response) => /* @__PURE__ */ figma.widget.h(ResponseItem, { key: response.code, response, codeMaxWidth: responseCodeMaxWidth, theme: sampleTheme }))))) : null,
       /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: 6, padding: { top: 6, right: 6, bottom: 6, left: 6 }, fill: COLORS.white, width: cardWidth, verticalAlignItems: "center" }, /* @__PURE__ */ figma.widget.h(Image, { name: "UpKeepDay Icon", src: upkeepday_widget_icon_default, width: 16, height: 16 }), /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Configure", iconSrc: settings_icon_default, onClick: () => openConfigure(config, Boolean(model)) }), /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Refresh", iconSrc: refresh_icon_default, onClick: () => waitForTask(refreshConfig(config)) }), copyablePath ? /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Copy Path", iconSrc: copy_alt_default, onClick: () => openCopyPathDialog(copyablePath) }) : null, /* @__PURE__ */ figma.widget.h(IconActionButton, { label: themeToggleLabel, iconSrc: themeToggleIcon, onClick: () => setSampleTheme(nextSampleThemeValue) }), /* @__PURE__ */ figma.widget.h(WidthButton, { mode: widthMode, onClick: () => setWidthMode(nextWidthMode(widthMode)) }), lastUpdatedAt ? /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, formatUpdatedAt(lastUpdatedAt)) : null),
       refreshStatusText ? /* @__PURE__ */ figma.widget.h(FooterStatusMessage, { message: refreshStatusText, cardWidth }) : null
     );
@@ -740,6 +908,35 @@
         figma.showUI(copyPathDialogHtml(pathToCopy), { width: 260, height: 104, themeColors: true });
       }));
     }
+    function openCopyTypescriptDialog(label, modelText) {
+      waitForTask(new Promise((resolve) => {
+        let isClosed = false;
+        const closeSession = () => {
+          if (isClosed) return;
+          isClosed = true;
+          figma.ui.hide();
+          resolve();
+        };
+        figma.ui.onmessage = (message) => {
+          if (typeof message !== "object" || message === null) return;
+          const payload = message;
+          if (payload.type === "copied") {
+            figma.notify(`${label} TypeScript copied.`);
+            closeSession();
+            return;
+          }
+          if (payload.type === "copy-error") {
+            figma.notify(typeof payload.message === "string" ? payload.message : `Unable to copy ${label.toLowerCase()} TypeScript.`);
+            closeSession();
+            return;
+          }
+          if (payload.type === "close") {
+            closeSession();
+          }
+        };
+        figma.showUI(copyTypescriptDialogHtml(label, modelText), { width: 420, height: 260, themeColors: true });
+      }));
+    }
   }
   function Title({ tag, cardWidth }) {
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, height: 60, padding: { left: 10, right: 10 }, verticalAlignItems: "center", fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 34, fontWeight: "bold", fill: COLORS.text }, tag));
@@ -758,6 +955,9 @@
   }
   function SectionBody({ children, cardWidth }) {
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, direction: "vertical", padding: { right: 6, bottom: 6, left: 6 }, spacing: 6, fill: COLORS.paleGreenAlt, overflow: "visible" }, children);
+  }
+  function SectionActionRow({ children, width }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width, direction: "horizontal", horizontalAlignItems: "end", verticalAlignItems: "center", overflow: "visible" }, children);
   }
   function CodeBlock({ json, minWidth, maxWidth = CODE_MAX_WIDTH, theme }) {
     const width = codeBlockWidth(json, minWidth, maxWidth);
@@ -933,6 +1133,133 @@
           parent.postMessage({ pluginMessage: { type: "copied" } }, "*");
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unable to copy path.";
+          parent.postMessage({ pluginMessage: { type: "copy-error", message } }, "*");
+        }
+      });
+      document.getElementById("cancel").addEventListener("click", () => {
+        parent.postMessage({ pluginMessage: { type: "close" } }, "*");
+      });
+    <\/script>
+  </body>
+</html>`;
+  }
+  function copyTypescriptDialogHtml(label, modelText) {
+    const modelJson = JSON.stringify(modelText);
+    const iconJson = JSON.stringify(typescript_icon_default);
+    const closeIconJson = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAMxJREFUeAHFlcsNwjAMhu1MkjE4wo0RuHayXhmBWzkyRjYJNglSBUlr17VqqVJru9+fp42n6y1mzCNmHF6Pe4IdbM4MQC/kO5Nj4gAYrcKnyhwDkAp9JHqiVWQGj8zkGWAncNEuV4+BawkWOMdQmrgF/iegFZHk4tYfpQNpCqwBNLPsCvRA7Nfs06JAS6S6RXCRQEMEQHGMAzjbsUvkusmux9T1ormWCtdi51quXRvOHvAlkW/TN8PZPiMudyVB6fGl6SPg0wr/FanM4Q2232Ehuj7+RgAAAABJRU5ErkJggg==";
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 14px;
+        color: #2f3442;
+        background: #ffffff;
+      }
+      .layout {
+        display: grid;
+        gap: 10px;
+      }
+      .title {
+        font-size: 13px;
+        font-weight: 700;
+      }
+      pre {
+        height: 146px;
+        margin: 0;
+        overflow: auto;
+        border: 1px solid #c8cbd2;
+        border-radius: 6px;
+        padding: 10px;
+        background: #f8faf9;
+        color: #2f3442;
+        font: 11px/16px "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      button {
+        height: 34px;
+        border: 1px solid #18a058;
+        border-radius: 6px;
+        padding: 0 12px;
+        color: #2f3442;
+        background: #e8f7ef;
+        font: inherit;
+        font-weight: 700;
+      }
+      .copy-button,
+      .close-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .copy-button img,
+      .close-button img {
+        width: 14px;
+        height: 14px;
+      }
+      .cancel {
+        border-color: #c8cbd2;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <div class="title">${escapeHtml(label)} TypeScript model</div>
+      <pre>${escapeHtml(modelText)}</pre>
+      <div class="actions">
+        <button class="copy-button" type="button" id="copy">Copy <img src=${iconJson} alt="" /></button>
+        <button class="cancel close-button" type="button" id="cancel">Close <img src=${closeIconJson} alt="" /></button>
+      </div>
+    </div>
+    <script>
+      const value = ${modelJson};
+      async function copyText(text) {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        try {
+          if (!document.execCommand("copy")) {
+            throw new Error("Unable to copy TypeScript model.");
+          }
+        } finally {
+          document.body.removeChild(textarea);
+        }
+      }
+      document.getElementById("copy").addEventListener("click", async () => {
+        try {
+          await copyText(value);
+          parent.postMessage({ pluginMessage: { type: "copied" } }, "*");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to copy TypeScript model.";
           parent.postMessage({ pluginMessage: { type: "copy-error", message } }, "*");
         }
       });

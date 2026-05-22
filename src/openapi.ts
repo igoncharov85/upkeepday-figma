@@ -29,6 +29,7 @@ export type EndpointViewModel = {
   request?: BodyExample;
   responses: ResponseExample[];
   response: ResponseExample;
+  responseTypescriptModel?: string;
 };
 
 export type BodyExample = {
@@ -38,6 +39,7 @@ export type BodyExample = {
   contentType: string;
   example: unknown;
   exampleJson: string;
+  typescriptModel?: string;
 };
 
 export type ResponseExample = {
@@ -46,6 +48,7 @@ export type ResponseExample = {
   contentType: string;
   example: unknown;
   exampleJson: string;
+  typescriptModel?: string;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -75,8 +78,9 @@ export function buildEndpointViewModel(spec: unknown, input: GenerateInput): End
     throw new Error(`${input.method} is not defined for "${input.path}".`);
   }
 
-  const request = extractRequestExample(root, pathItem, operation);
-  const responses = extractResponseExamples(root, operation, input.responseCodes);
+  const baseTypeName = endpointTypeName(operation, input);
+  const request = extractRequestExample(root, pathItem, operation, baseTypeName);
+  const responses = extractResponseExamples(root, operation, input.responseCodes, baseTypeName);
 
   return {
     swaggerUrl: input.swaggerUrl,
@@ -87,7 +91,8 @@ export function buildEndpointViewModel(spec: unknown, input: GenerateInput): End
     description: asString(operation.description),
     request,
     responses,
-    response: responses[0]
+    response: responses[0],
+    responseTypescriptModel: responseTypescriptModel(baseTypeName, responses)
   };
 }
 
@@ -134,7 +139,7 @@ export function extractSwaggerActions(spec: unknown): SwaggerAction[] {
   });
 }
 
-function extractRequestExample(root: JsonObject, pathItem: JsonObject, operation: JsonObject): BodyExample | undefined {
+function extractRequestExample(root: JsonObject, pathItem: JsonObject, operation: JsonObject, baseTypeName: string): BodyExample | undefined {
   const openApiBody = asOptionalObject(operation.requestBody);
 
   if (openApiBody) {
@@ -151,7 +156,8 @@ function extractRequestExample(root: JsonObject, pathItem: JsonObject, operation
       typeLabel: schemaTypeLabel(root, schema),
       contentType: chosen.contentType,
       example,
-      exampleJson: stringifyExample(example)
+      exampleJson: stringifyExample(example),
+      typescriptModel: schema ? typescriptDeclarationFromSchema(root, schema, `${baseTypeName}Payload`) : undefined
     };
   }
 
@@ -173,7 +179,8 @@ function extractRequestExample(root: JsonObject, pathItem: JsonObject, operation
     typeLabel: schemaTypeLabel(root, schema),
     contentType,
     example,
-    exampleJson: stringifyExample(example)
+    exampleJson: stringifyExample(example),
+    typescriptModel: schema ? typescriptDeclarationFromSchema(root, schema, `${baseTypeName}Payload`) : undefined
   };
 }
 
@@ -182,10 +189,10 @@ function extractResponseCodes(operation: JsonObject): string[] {
   return responses ? sortedResponseCodes(Object.keys(responses)) : [];
 }
 
-function extractResponseExamples(root: JsonObject, operation: JsonObject, selectedCodes: string[] | undefined): ResponseExample[] {
+function extractResponseExamples(root: JsonObject, operation: JsonObject, selectedCodes: string[] | undefined, baseTypeName: string): ResponseExample[] {
   const responses = asObject(operation.responses, "responses");
   const codes = chooseResponseCodes(responses, selectedCodes);
-  return codes.map((code) => extractResponseExample(root, operation, responses, code));
+  return codes.map((code) => extractResponseExample(root, operation, responses, code, baseTypeName));
 }
 
 function chooseResponseCodes(responses: JsonObject, selectedCodes: string[] | undefined): string[] {
@@ -213,11 +220,12 @@ function chooseResponseCodes(responses: JsonObject, selectedCodes: string[] | un
   return [availableCodes.includes("200") ? "200" : availableCodes[0]];
 }
 
-function extractResponseExample(root: JsonObject, operation: JsonObject, responses: JsonObject, code: string): ResponseExample {
+function extractResponseExample(root: JsonObject, operation: JsonObject, responses: JsonObject, code: string, baseTypeName: string): ResponseExample {
   const responseObject = asObject(responses[code], `response ${code}`);
   const response = asObject(resolveMaybeRef(root, responseObject), `response ${code}`);
   const content = asOptionalObject(response.content);
   const chosen = chooseContent(content);
+  const typeName = `${baseTypeName}${responseCodeTypePart(code)}Response`;
 
   if (chosen) {
     const schema = asOptionalObject(chosen.media.schema);
@@ -228,7 +236,8 @@ function extractResponseExample(root: JsonObject, operation: JsonObject, respons
       description: asString(response.description) ?? "Success",
       contentType: chosen.contentType,
       example,
-      exampleJson: stringifyExample(example)
+      exampleJson: stringifyExample(example),
+      typescriptModel: schema ? typescriptDeclarationFromSchema(root, schema, typeName) : undefined
     };
   }
 
@@ -241,7 +250,8 @@ function extractResponseExample(root: JsonObject, operation: JsonObject, respons
     description: asString(response.description) ?? "Success",
     contentType,
     example,
-    exampleJson: stringifyExample(example)
+    exampleJson: stringifyExample(example),
+    typescriptModel: schema ? typescriptDeclarationFromSchema(root, schema, typeName) : undefined
   };
 }
 
@@ -255,6 +265,220 @@ function sortedResponseCodes(codes: string[]): string[] {
     if (rightIsNumeric) return 1;
     return left.localeCompare(right);
   });
+}
+
+function endpointTypeName(operation: JsonObject, input: GenerateInput): string {
+  const operationId = asString(operation.operationId);
+  if (operationId) return toPascalCase(operationId) || "Endpoint";
+
+  return toPascalCase(`${input.method} ${input.path.replace(/[{}]/g, " ")}`) || "Endpoint";
+}
+
+function responseTypescriptModel(baseTypeName: string, responses: ResponseExample[]): string | undefined {
+  const models = responses.map((response) => response.typescriptModel).filter((model): model is string => Boolean(model));
+  if (models.length === 0) return undefined;
+
+  const responseTypeNames = responses
+    .filter((response) => response.typescriptModel)
+    .map((response) => `${baseTypeName}${responseCodeTypePart(response.code)}Response`);
+
+  if (responseTypeNames.length <= 1) return models.join("\n\n");
+
+  return [
+    ...models,
+    `type ${baseTypeName}Response = ${responseTypeNames.join(" | ")};`
+  ].join("\n\n");
+}
+
+function typescriptDeclarationFromSchema(root: JsonObject, schema: JsonObject, typeName: string): string {
+  const resolved = mergeRef(root, schema);
+  const type = typescriptType(root, resolved, 0, new Set<string>());
+
+  if (type.kind === "object") {
+    return `interface ${typeName} ${type.value}`;
+  }
+
+  return `type ${typeName} = ${type.value};`;
+}
+
+type TypeScriptType = {
+  kind: "object" | "type";
+  value: string;
+};
+
+function typescriptType(root: JsonObject, schema: unknown, depth: number, seen: Set<string>): TypeScriptType {
+  if (depth > 12) return { kind: "type", value: "unknown" };
+
+  const current = asOptionalObject(schema);
+  if (!current) return { kind: "type", value: "unknown" };
+
+  const ref = asString(current.$ref);
+  if (ref) {
+    if (seen.has(ref)) return { kind: "type", value: "unknown" };
+    const nextSeen = new Set(seen);
+    nextSeen.add(ref);
+    return typescriptType(root, mergeRef(root, current), depth + 1, nextSeen);
+  }
+
+  const enumType = typescriptEnumType(current);
+  if (enumType) return withNullable(current, { kind: "type", value: enumType });
+
+  const allOf = asArray(current.allOf).map(asOptionalObject).filter(Boolean) as JsonObject[];
+  if (allOf.length > 0) {
+    const merged = mergeObjectSchemas(allOf.map((item) => mergeRef(root, item)));
+    if (merged) return withNullable(current, typescriptType(root, merged, depth + 1, seen));
+
+    const parts = allOf.map((item) => parenthesizedType(typescriptType(root, item, depth + 1, seen).value));
+    return withNullable(current, { kind: "type", value: parts.join(" & ") || "unknown" });
+  }
+
+  const variants = asArray(current.oneOf).length > 0 ? asArray(current.oneOf) : asArray(current.anyOf);
+  if (variants.length > 0) {
+    const parts = variants.map((item) => typescriptType(root, item, depth + 1, seen).value);
+    return withNullable(current, { kind: "type", value: unique(parts).join(" | ") || "unknown" });
+  }
+
+  const type = normalizedType(current);
+
+  if (type === "array") {
+    const itemType = typescriptType(root, current.items, depth + 1, seen).value;
+    return withNullable(current, { kind: "type", value: `${parenthesizedArrayType(itemType)}[]` });
+  }
+
+  if (type === "object" || current.properties || current.additionalProperties) {
+    return withNullable(current, typescriptObjectType(root, current, depth, seen));
+  }
+
+  if (type === "integer" || type === "number") return withNullable(current, { kind: "type", value: "number" });
+  if (type === "boolean") return withNullable(current, { kind: "type", value: "boolean" });
+  if (type === "string") return withNullable(current, { kind: "type", value: "string" });
+
+  return withNullable(current, { kind: "type", value: "unknown" });
+}
+
+function typescriptObjectType(root: JsonObject, schema: JsonObject, depth: number, seen: Set<string>): TypeScriptType {
+  const properties = asOptionalObject(schema.properties);
+  const required = new Set(asArray(schema.required).filter((item): item is string => typeof item === "string"));
+  const lines: string[] = [];
+
+  if (properties) {
+    for (const [propertyName, propertySchema] of Object.entries(properties)) {
+      const optional = required.has(propertyName) ? "" : "?";
+      const propertyType = typescriptType(root, propertySchema, depth + 1, new Set(seen)).value;
+      lines.push(`${indent(1)}${typescriptPropertyName(propertyName)}${optional}: ${propertyType};`);
+    }
+  }
+
+  const additionalProperties = schema.additionalProperties;
+  if (isPlainObject(additionalProperties)) {
+    const additionalType = typescriptType(root, additionalProperties, depth + 1, seen).value;
+    lines.push(`${indent(1)}[key: string]: ${additionalType};`);
+  } else if (additionalProperties === true && lines.length === 0) {
+    lines.push(`${indent(1)}[key: string]: unknown;`);
+  }
+
+  if (lines.length === 0) return { kind: "object", value: "{\n  [key: string]: unknown;\n}" };
+
+  return { kind: "object", value: `{\n${lines.join("\n")}\n}` };
+}
+
+function typescriptEnumType(schema: JsonObject): string | undefined {
+  if (!Array.isArray(schema.enum) || schema.enum.length === 0) return undefined;
+
+  return unique(schema.enum.map((item) => {
+    if (typeof item === "string") return JSON.stringify(item);
+    if (typeof item === "number" || typeof item === "boolean") return String(item);
+    if (item === null) return "null";
+    return "unknown";
+  })).join(" | ");
+}
+
+function withNullable(schema: JsonObject, type: TypeScriptType): TypeScriptType {
+  if (!isNullableSchema(schema) || type.value.includes("null")) return type;
+
+  return {
+    kind: "type",
+    value: `${type.value} | null`
+  };
+}
+
+function isNullableSchema(schema: JsonObject): boolean {
+  return schema.nullable === true || (Array.isArray(schema.type) && schema.type.includes("null"));
+}
+
+function mergeRef(root: JsonObject, schema: JsonObject): JsonObject {
+  const ref = asString(schema.$ref);
+  if (!ref) return schema;
+
+  return {
+    ...asOptionalObject(resolveRef(root, ref)),
+    ...withoutRef(schema)
+  };
+}
+
+function mergeObjectSchemas(schemas: JsonObject[]): JsonObject | undefined {
+  const merged: JsonObject = { type: "object", properties: {}, required: [] };
+  const mergedProperties = asObject(merged.properties, "merged properties");
+  const mergedRequired: string[] = [];
+
+  for (const schema of schemas) {
+    const current = asOptionalObject(schema);
+    if (!current || (!current.properties && normalizedType(current) !== "object")) return undefined;
+
+    Object.assign(mergedProperties, asOptionalObject(current.properties) ?? {});
+    mergedRequired.push(...asArray(current.required).filter((item): item is string => typeof item === "string"));
+
+    if (current.additionalProperties !== undefined) {
+      merged.additionalProperties = current.additionalProperties;
+    }
+  }
+
+  merged.required = unique(mergedRequired);
+  return merged;
+}
+
+function toPascalCase(value: string): string {
+  const words = value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean);
+
+  const result = words.map((word) => {
+    const normalized = word.toLowerCase();
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }).join("");
+
+  return /^[0-9]/.test(result) ? `Model${result}` : result;
+}
+
+function responseCodeTypePart(code: string): string {
+  const words = code.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+  const result = words.map((word) => {
+    const normalized = word.toLowerCase();
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }).join("");
+
+  return result || "Default";
+}
+
+function typescriptPropertyName(name: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
+}
+
+function parenthesizedArrayType(value: string): string {
+  return value.includes(" | ") || value.includes(" & ") ? `(${value})` : value;
+}
+
+function parenthesizedType(value: string): string {
+  return value.startsWith("{") && value.endsWith("}") ? `(${value})` : value;
+}
+
+function indent(level: number): string {
+  return "  ".repeat(level);
+}
+
+function unique<T>(items: T[]): T[] {
+  return [...new Set(items)];
 }
 
 export function exampleFromSchema(root: unknown, schema: unknown, depth = 0, seen = new Set<string>()): unknown {

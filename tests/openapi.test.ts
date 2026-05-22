@@ -176,11 +176,20 @@ describe("buildEndpointViewModel", () => {
       Type: "Dismiss"
     });
     expect(model.request?.exampleJson).toBe('{\n  "Id": 0,\n  "Type": "Dismiss"\n}');
+    expect(model.request?.typescriptModel).toBe(`interface PostActionOnToDoRoutePayload {
+  Id: number;
+  Type: "Dismiss";
+}`);
     expect(model.response.example).toEqual({
       Message: "string",
       Status: "Success"
     });
     expect(model.response.exampleJson).toBe('{\n  "Message": "string",\n  "Status": "Success"\n}');
+    expect(model.response.typescriptModel).toBe(`interface PostActionOnToDoRoute200Response {
+  Message?: string | null;
+  Status?: "Success" | "Warning" | "Error";
+}`);
+    expect(model.responseTypescriptModel).toBe(model.response.typescriptModel);
     expect(model.response.code).toBe("200");
     expect(model.responses.map((response) => response.code)).toEqual(["200"]);
     expect(model.description).toBe("Runs an action on a student todo item.");
@@ -202,6 +211,16 @@ describe("buildEndpointViewModel", () => {
     expect(model.responses[1].example).toEqual({
       Error: "string"
     });
+    expect(model.responseTypescriptModel).toBe(`interface PostActionOnToDoRoute200Response {
+  Message?: string | null;
+  Status?: "Success" | "Warning" | "Error";
+}
+
+interface PostActionOnToDoRoute400Response {
+  Error?: string;
+}
+
+type PostActionOnToDoRouteResponse = PostActionOnToDoRoute200Response | PostActionOnToDoRoute400Response;`);
   });
 
   it("builds OpenAPI 3 request and response examples", () => {
@@ -216,9 +235,12 @@ describe("buildEndpointViewModel", () => {
                 "application/json": {
                   schema: {
                     type: "object",
+                    required: ["name"],
                     properties: {
                       name: { type: "string" },
-                      active: { type: "boolean" }
+                      active: { type: "boolean" },
+                      tags: { type: "array", items: { type: "string", nullable: true } },
+                      metadata: { type: "object", additionalProperties: { type: "integer" } }
                     }
                   }
                 }
@@ -246,9 +268,73 @@ describe("buildEndpointViewModel", () => {
       method: "POST"
     });
 
-    expect(model.request?.example).toEqual({ name: "string", active: true });
+    expect(model.request?.example).toEqual({ name: "string", active: true, tags: ["string"], metadata: { additionalProperty: 0 } });
+    expect(model.request?.typescriptModel).toBe(`interface PostItemsPayload {
+  name: string;
+  active?: boolean;
+  tags?: (string | null)[];
+  metadata?: {
+  [key: string]: number;
+};
+}`);
     expect(model.response.example).toEqual([0]);
+    expect(model.response.typescriptModel).toBe("type PostItems200Response = number[];");
     expect(model.description).toBeUndefined();
+  });
+
+  it("builds TypeScript models for nullable refs, invalid property names, and allOf", () => {
+    const model = buildEndpointViewModel({
+      openapi: "3.0.0",
+      paths: {
+        "/accounts/{account-id}": {
+          get: {
+            responses: {
+              "200": {
+                description: "OK",
+                content: {
+                  "application/json": {
+                    schema: {
+                      allOf: [
+                        { $ref: "#/components/schemas/BaseAccount" },
+                        {
+                          type: "object",
+                          required: ["status"],
+                          properties: {
+                            status: { type: "string", enum: ["Active", "Paused"] },
+                            "display-name": { type: ["string", "null"] }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      components: {
+        schemas: {
+          BaseAccount: {
+            type: "object",
+            required: ["id"],
+            properties: {
+              id: { type: "integer" }
+            }
+          }
+        }
+      }
+    }, {
+      swaggerUrl: "https://example.com/openapi.json",
+      path: "/accounts/{account-id}",
+      method: "GET"
+    });
+
+    expect(model.response.typescriptModel).toBe(`interface GetAccountsAccountId200Response {
+  id: number;
+  status: "Active" | "Paused";
+  "display-name"?: string | null;
+}`);
   });
 
   it("throws a useful error for missing operations", () => {

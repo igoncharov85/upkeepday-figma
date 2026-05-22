@@ -6,6 +6,7 @@ import refreshIcon from "../assets/refresh-icon.png";
 import settingsIcon from "../assets/settings-icon.png";
 import textBlackIcon from "../assets/text-black.png";
 import textWhiteIcon from "../assets/text-white.png";
+import typescriptIcon from "../assets/typescript-icon.png";
 import widthChevronIcon from "../assets/width-chevron-icon.png";
 
 const { widget } = figma;
@@ -92,6 +93,8 @@ function OpenApiMiniViewerWidget() {
   const themeToggleIcon = nextSampleThemeValue === "light" ? textBlackIcon : textWhiteIcon;
   const themeToggleLabel = nextSampleThemeValue === "light" ? "Light Samples" : "Dark Samples";
   const refreshStatusText = loadingMessage === "Refreshing endpoint..." && activeMethod && activePath ? `Refreshing: ${activeMethod} ${activePath}` : "";
+  const payloadTypescriptModel = model?.request?.typescriptModel;
+  const responseTypescriptModel = model?.responseTypescriptModel;
 
   useEffect(() => {
     if (initialized) return;
@@ -222,10 +225,12 @@ function OpenApiMiniViewerWidget() {
         <>
           <SectionTitle title="Parameters" cardWidth={cardWidth} />
           <SectionBody cardWidth={cardWidth}>
+            {payloadTypescriptModel ? <SectionActionRow width={codeMaxWidth}><IconActionButton label="Payload TypeScript" iconSrc={typescriptIcon} onClick={() => openCopyTypescriptDialog("Payload", payloadTypescriptModel)} /></SectionActionRow> : null}
             {model.request ? <CodeBlock json={model.request.exampleJson} minWidth={codeMaxWidth} maxWidth={codeMaxWidth} theme={sampleTheme} /> : <MutedText>No request body parameters.</MutedText>}
           </SectionBody>
           <SectionTitle title="Responses" cardWidth={cardWidth} />
           <SectionBody cardWidth={cardWidth}>
+            {responseTypescriptModel ? <SectionActionRow width={codeMaxWidth}><IconActionButton label="Response TypeScript" iconSrc={typescriptIcon} onClick={() => openCopyTypescriptDialog("Response", responseTypescriptModel)} /></SectionActionRow> : null}
             <AutoLayout direction="vertical" spacing={8} overflow="visible">
               {displayedResponses.map((response) => (
                 <ResponseItem key={response.code} response={response} codeMaxWidth={responseCodeMaxWidth} theme={sampleTheme} />
@@ -339,6 +344,42 @@ function OpenApiMiniViewerWidget() {
       figma.showUI(copyPathDialogHtml(pathToCopy), { width: 260, height: 104, themeColors: true });
     }));
   }
+
+  function openCopyTypescriptDialog(label: "Payload" | "Response", modelText: string): void {
+    waitForTask(new Promise<void>((resolve) => {
+      let isClosed = false;
+
+      const closeSession = () => {
+        if (isClosed) return;
+        isClosed = true;
+        figma.ui.hide();
+        resolve();
+      };
+
+      figma.ui.onmessage = (message: unknown) => {
+        if (typeof message !== "object" || message === null) return;
+        const payload = message as Record<string, unknown>;
+
+        if (payload.type === "copied") {
+          figma.notify(`${label} TypeScript copied.`);
+          closeSession();
+          return;
+        }
+
+        if (payload.type === "copy-error") {
+          figma.notify(typeof payload.message === "string" ? payload.message : `Unable to copy ${label.toLowerCase()} TypeScript.`);
+          closeSession();
+          return;
+        }
+
+        if (payload.type === "close") {
+          closeSession();
+        }
+      };
+
+      figma.showUI(copyTypescriptDialogHtml(label, modelText), { width: 420, height: 260, themeColors: true });
+    }));
+  }
 }
 
 function Title({ tag, cardWidth }: { tag: string; cardWidth: number }) {
@@ -390,6 +431,14 @@ function SectionTitle({ title, cardWidth }: { title: string; cardWidth: number }
 function SectionBody({ children, cardWidth }: { children: FigmaDeclarativeNode; cardWidth: number }) {
   return (
     <AutoLayout width={cardWidth} direction="vertical" padding={{ right: 6, bottom: 6, left: 6 }} spacing={6} fill={COLORS.paleGreenAlt} overflow="visible">
+      {children}
+    </AutoLayout>
+  );
+}
+
+function SectionActionRow({ children, width }: { children: FigmaDeclarativeNode; width: number }) {
+  return (
+    <AutoLayout width={width} direction="horizontal" horizontalAlignItems="end" verticalAlignItems="center" overflow="visible">
       {children}
     </AutoLayout>
   );
@@ -607,6 +656,134 @@ function copyPathDialogHtml(pathToCopy: string): string {
           parent.postMessage({ pluginMessage: { type: "copied" } }, "*");
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unable to copy path.";
+          parent.postMessage({ pluginMessage: { type: "copy-error", message } }, "*");
+        }
+      });
+      document.getElementById("cancel").addEventListener("click", () => {
+        parent.postMessage({ pluginMessage: { type: "close" } }, "*");
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+function copyTypescriptDialogHtml(label: "Payload" | "Response", modelText: string): string {
+  const modelJson = JSON.stringify(modelText);
+  const iconJson = JSON.stringify(typescriptIcon);
+  const closeIconJson = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAMxJREFUeAHFlcsNwjAMhu1MkjE4wo0RuHayXhmBWzkyRjYJNglSBUlr17VqqVJru9+fp42n6y1mzCNmHF6Pe4IdbM4MQC/kO5Nj4gAYrcKnyhwDkAp9JHqiVWQGj8zkGWAncNEuV4+BawkWOMdQmrgF/iegFZHk4tYfpQNpCqwBNLPsCvRA7Nfs06JAS6S6RXCRQEMEQHGMAzjbsUvkusmux9T1ormWCtdi51quXRvOHvAlkW/TN8PZPiMudyVB6fGl6SPg0wr/FanM4Q2232Ehuj7+RgAAAABJRU5ErkJggg==";
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 14px;
+        color: #2f3442;
+        background: #ffffff;
+      }
+      .layout {
+        display: grid;
+        gap: 10px;
+      }
+      .title {
+        font-size: 13px;
+        font-weight: 700;
+      }
+      pre {
+        height: 146px;
+        margin: 0;
+        overflow: auto;
+        border: 1px solid #c8cbd2;
+        border-radius: 6px;
+        padding: 10px;
+        background: #f8faf9;
+        color: #2f3442;
+        font: 11px/16px "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      button {
+        height: 34px;
+        border: 1px solid #18a058;
+        border-radius: 6px;
+        padding: 0 12px;
+        color: #2f3442;
+        background: #e8f7ef;
+        font: inherit;
+        font-weight: 700;
+      }
+      .copy-button,
+      .close-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .copy-button img,
+      .close-button img {
+        width: 14px;
+        height: 14px;
+      }
+      .cancel {
+        border-color: #c8cbd2;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <div class="title">${escapeHtml(label)} TypeScript model</div>
+      <pre>${escapeHtml(modelText)}</pre>
+      <div class="actions">
+        <button class="copy-button" type="button" id="copy">Copy <img src=${iconJson} alt="" /></button>
+        <button class="cancel close-button" type="button" id="cancel">Close <img src=${closeIconJson} alt="" /></button>
+      </div>
+    </div>
+    <script>
+      const value = ${modelJson};
+      async function copyText(text) {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        try {
+          if (!document.execCommand("copy")) {
+            throw new Error("Unable to copy TypeScript model.");
+          }
+        } finally {
+          document.body.removeChild(textarea);
+        }
+      }
+      document.getElementById("copy").addEventListener("click", async () => {
+        try {
+          await copyText(value);
+          parent.postMessage({ pluginMessage: { type: "copied" } }, "*");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to copy TypeScript model.";
           parent.postMessage({ pluginMessage: { type: "copy-error", message } }, "*");
         }
       });
