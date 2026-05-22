@@ -17,7 +17,7 @@ The widget icon source asset is included at `assets/upkeepday-fav.png`, with a b
 
 Insert the widget to open configuration automatically, or use **Configure** from the widget controls or property menu later and enter:
 
-- Swagger/OpenAPI JSON URL, for example `https://api.upkeepday.com/swagger.json`
+- Swagger/OpenAPI JSON URL, for example `https://petstore3.swagger.io/api/v3/openapi.json`
 - Method: `GET`, `POST`, `PUT`, or `DELETE`
 - Path, for example `/student/todos/action`
 

@@ -1,6 +1,8 @@
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
+  var __defProps = Object.defineProperties;
+  var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
   var __getOwnPropSymbols = Object.getOwnPropertySymbols;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
   var __propIsEnum = Object.prototype.propertyIsEnumerable;
@@ -16,6 +18,7 @@
       }
     return a;
   };
+  var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
   var __objRest = (source, exclude) => {
     var target = {};
     for (var prop in source)
@@ -50,15 +53,17 @@
       throw new Error(`${input.method} is not defined for "${input.path}".`);
     }
     const request = extractRequestExample(root, pathItem, operation);
-    const response = extractResponseExample(root, operation);
+    const responses = extractResponseExamples(root, operation, input.responseCodes);
     return {
       swaggerUrl: input.swaggerUrl,
       method: input.method,
       path: input.path,
       operationId: asString(operation.operationId),
       tag: firstString(operation.tags),
+      description: asString(operation.description),
       request,
-      response
+      responses,
+      response: responses[0]
     };
   }
   function extractSwaggerActions(spec) {
@@ -75,6 +80,7 @@
         const tag = firstString(operation.tags);
         const summary = asString(operation.summary);
         const description = asString(operation.description);
+        const responseCodes = extractResponseCodes(operation);
         const label = `${method} ${path}`;
         const searchIndex = [
           method,
@@ -92,6 +98,7 @@
           tag,
           summary,
           description,
+          responseCodes,
           searchIndex
         }];
       });
@@ -133,14 +140,37 @@
       exampleJson: stringifyExample(example)
     };
   }
-  function extractResponseExample(root, operation) {
-    var _a, _b, _c, _d, _e;
+  function extractResponseCodes(operation) {
+    const responses = asOptionalObject(operation.responses);
+    return responses ? sortedResponseCodes(Object.keys(responses)) : [];
+  }
+  function extractResponseExamples(root, operation, selectedCodes) {
     const responses = asObject(operation.responses, "responses");
-    const code = responses["200"] ? "200" : Object.keys(responses).find((candidate) => candidate.startsWith("2"));
-    if (!code) {
-      throw new Error("No 200 or other 2xx response was found for this operation.");
+    const codes = chooseResponseCodes(responses, selectedCodes);
+    return codes.map((code) => extractResponseExample(root, operation, responses, code));
+  }
+  function chooseResponseCodes(responses, selectedCodes) {
+    const availableCodes = sortedResponseCodes(Object.keys(responses));
+    if (availableCodes.length === 0) {
+      throw new Error("No responses were found for this operation.");
     }
-    const response = asObject(responses[code], `response ${code}`);
+    const requestedCodes = (selectedCodes != null ? selectedCodes : []).map((code) => code.trim()).filter(Boolean);
+    if (requestedCodes.length > 0) {
+      const missingCode = requestedCodes.find((code) => !Object.prototype.hasOwnProperty.call(responses, code));
+      if (missingCode) {
+        throw new Error(`Response code "${missingCode}" was not found for this operation.`);
+      }
+      return requestedCodes;
+    }
+    if (availableCodes.length === 1) {
+      return availableCodes;
+    }
+    return [availableCodes.includes("200") ? "200" : availableCodes[0]];
+  }
+  function extractResponseExample(root, operation, responses, code) {
+    var _a, _b, _c, _d, _e;
+    const responseObject = asObject(responses[code], `response ${code}`);
+    const response = asObject(resolveMaybeRef(root, responseObject), `response ${code}`);
     const content = asOptionalObject(response.content);
     const chosen = chooseContent(content);
     if (chosen) {
@@ -164,6 +194,16 @@
       example,
       exampleJson: stringifyExample(example)
     };
+  }
+  function sortedResponseCodes(codes) {
+    return [...codes].sort((left, right) => {
+      const leftIsNumeric = /^\d+$/.test(left);
+      const rightIsNumeric = /^\d+$/.test(right);
+      if (leftIsNumeric && rightIsNumeric) return Number(left) - Number(right);
+      if (leftIsNumeric) return -1;
+      if (rightIsNumeric) return 1;
+      return left.localeCompare(right);
+    });
   }
   function exampleFromSchema(root, schema, depth = 0, seen = /* @__PURE__ */ new Set()) {
     var _a, _b;
@@ -427,11 +467,14 @@
   // src/widget.tsx
   var { widget } = figma;
   var { AutoLayout, Image, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
-  var DEFAULT_SWAGGER_URL = "https://api.upkeepday.com/swagger.json";
+  var DEFAULT_SWAGGER_URL = "https://petstore3.swagger.io/api/v3/openapi.json";
   var LAST_CONFIG_STORAGE_KEY = "openapi-mini-viewer:last-config";
   var CARD_WIDTH = 760;
   var CODE_MIN_WIDTH = CARD_WIDTH - 12;
   var CODE_MAX_WIDTH = 1800;
+  var RESPONSE_CODE_LABEL_WIDTH = 58;
+  var RESPONSE_ROW_GAP = 8;
+  var RESPONSE_CODE_MAX_WIDTH = CARD_WIDTH - 12 - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
   var CODE_FONT_SIZE = 14;
   var CODE_LINE_HEIGHT = 20;
   var CODE_HORIZONTAL_PADDING = 28;
@@ -457,31 +500,35 @@
   var cachedSpecUrl = "";
   var cachedSpec;
   function OpenApiMiniViewerWidget() {
-    var _a, _b;
+    var _a, _b, _c;
     const widgetNodeId = useWidgetNodeId();
     const [swaggerUrl, setSwaggerUrl] = useSyncedState("swaggerUrl", DEFAULT_SWAGGER_URL);
     const [method, setMethod] = useSyncedState("method", "");
     const [path, setPath] = useSyncedState("path", "");
+    const [responseCodes, setResponseCodes] = useSyncedState("responseCodes", []);
     const [model, setModel] = useSyncedState("model", null);
     const [error, setError] = useSyncedState("error", "");
     const [loadingMessage, setLoadingMessage] = useSyncedState("loadingMessage", "");
     const [initialized, setInitialized] = useSyncedState("initialized", false);
     const [lastUpdatedAt, setLastUpdatedAt] = useSyncedState("lastUpdatedAt", "");
-    const config = { swaggerUrl, method, path };
+    const config = { swaggerUrl, method, path, responseCodes };
+    const displayedResponses = (_a = model == null ? void 0 : model.responses) != null ? _a : (model == null ? void 0 : model.response) ? [model.response] : [];
     useEffect(() => {
       if (initialized) return;
       waitForTask((async () => {
-        var _a2, _b2, _c;
+        var _a2, _b2, _c2;
         const savedSwaggerUrl = await readSavedSwaggerUrl();
         const variableConfig = await readVariableConfig();
         const nextConfig = {
           swaggerUrl: (_a2 = savedSwaggerUrl != null ? savedSwaggerUrl : variableConfig.swaggerUrl) != null ? _a2 : swaggerUrl,
           method: (_b2 = variableConfig.method) != null ? _b2 : "",
-          path: (_c = variableConfig.path) != null ? _c : ""
+          path: (_c2 = variableConfig.path) != null ? _c2 : "",
+          responseCodes: []
         };
         setSwaggerUrl(nextConfig.swaggerUrl);
         setMethod(nextConfig.method);
         setPath(nextConfig.path);
+        setResponseCodes(nextConfig.responseCodes);
         setInitialized(true);
         openConfigure(nextConfig, Boolean(model));
       })());
@@ -512,6 +559,7 @@
       setSwaggerUrl(nextConfig.swaggerUrl);
       setMethod(nextConfig.method);
       setPath(nextConfig.path);
+      setResponseCodes(nextConfig.responseCodes);
       try {
         await renderEndpoint(requireRenderableConfig(nextConfig));
       } catch (renderError) {
@@ -566,11 +614,12 @@
         overflow: "visible"
       },
       (model == null ? void 0 : model.tag) ? /* @__PURE__ */ figma.widget.h(Title, { tag: model.tag }) : null,
-      /* @__PURE__ */ figma.widget.h(Header, { method: (_a = model == null ? void 0 : model.method) != null ? _a : method, path: (_b = model == null ? void 0 : model.path) != null ? _b : path }),
+      /* @__PURE__ */ figma.widget.h(Header, { method: (_b = model == null ? void 0 : model.method) != null ? _b : method, path: (_c = model == null ? void 0 : model.path) != null ? _c : path }),
+      (model == null ? void 0 : model.description) ? /* @__PURE__ */ figma.widget.h(EndpointDescription, { description: model.description }) : null,
       loadingMessage ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted" }) : null,
       error ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: error, tone: "error" }) : null,
       !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Configure or refresh to render an OpenAPI endpoint.", tone: "muted" }) : null,
-      model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.response.exampleJson }))) : null,
+      model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses" }), /* @__PURE__ */ figma.widget.h(SectionBody, null, /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "vertical", spacing: 8, overflow: "visible" }, displayedResponses.map((response) => /* @__PURE__ */ figma.widget.h(ResponseItem, { key: response.code, response }))))) : null,
       /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: 8, padding: { top: 8, right: 8, bottom: 8, left: 8 }, fill: COLORS.white, width: CARD_WIDTH, verticalAlignItems: "center" }, /* @__PURE__ */ figma.widget.h(Image, { name: "UpKeepDay Icon", src: upkeepday_widget_icon_default, width: 18, height: 18 }), /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Configure", onClick: () => openConfigure(config, Boolean(model)) }), /* @__PURE__ */ figma.widget.h(ActionButton, { label: "Refresh", onClick: () => waitForTask(refreshConfig(config)) }), lastUpdatedAt ? /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, "Updated ", formatUpdatedAt(lastUpdatedAt)) : null)
     );
     function openConfigure(currentConfig, canRefresh) {
@@ -583,6 +632,7 @@
           resolve();
         };
         figma.ui.onmessage = (message) => {
+          var _a2;
           let payload;
           try {
             payload = parseMessage(message);
@@ -607,11 +657,12 @@
           sessionConfig = {
             swaggerUrl: payload.swaggerUrl,
             method: normalizeMethod(payload.method),
-            path: payload.path
+            path: payload.path,
+            responseCodes: (_a2 = payload.responseCodes) != null ? _a2 : []
           };
           waitForTask(applyConfigAndRender(sessionConfig));
         };
-        figma.showUI(__html__, { width: 380, height: 398, themeColors: true });
+        figma.showUI(__html__, { width: 380, height: 430, themeColors: true });
         figma.ui.postMessage({
           type: "selection",
           canRefresh,
@@ -626,17 +677,24 @@
   function Header({ method, path }) {
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, height: 56, direction: "horizontal", spacing: 16, padding: { top: 8, right: 10, bottom: 8, left: 4 }, verticalAlignItems: "center", fill: COLORS.paleGreen }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: CARD_WIDTH - 154, fontSize: 27, fontWeight: "bold", fill: COLORS.text }, path));
   }
+  function EndpointDescription({ description }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, padding: { top: 22, right: 32, bottom: 22, left: 32 }, fill: COLORS.paleGreen, overflow: "visible" }, /* @__PURE__ */ figma.widget.h(Text, { width: CARD_WIDTH - 64, fontSize: 20, lineHeight: 28, fill: COLORS.text }, description));
+  }
   function SectionTitle({ title }) {
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, padding: { top: 6, right: 6, bottom: 4, left: 6 }, fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.text }, title));
   }
   function SectionBody({ children }) {
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: CARD_WIDTH, direction: "vertical", padding: { right: 6, bottom: 6, left: 6 }, spacing: 6, fill: COLORS.paleGreenAlt, overflow: "visible" }, children);
   }
-  function CodeBlock({ json }) {
-    const width = codeBlockWidth(json);
-    const height = codeBlockHeight(json);
-    const lines = jsonToLines(json);
-    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width, height, direction: "vertical", padding: { top: 12, right: 14, bottom: 12, left: 14 }, fill: COLORS.codeBackground, cornerRadius: 4, spacing: 0 }, lines.map((line, index) => /* @__PURE__ */ figma.widget.h(Text, { key: index, width: width - CODE_HORIZONTAL_PADDING, height: CODE_LINE_HEIGHT, fontFamily: "Roboto Mono", fontSize: CODE_FONT_SIZE, lineHeight: CODE_LINE_HEIGHT, fill: COLORS.white }, line.length > 0 ? line.map((chunk, chunkIndex) => /* @__PURE__ */ figma.widget.h(Span, { key: chunkIndex, fill: chunkColor(chunk) }, chunk.text)) : " ")));
+  function CodeBlock({ json, maxWidth = CODE_MAX_WIDTH }) {
+    const width = codeBlockWidth(json, maxWidth);
+    const textWidth = width - CODE_HORIZONTAL_PADDING;
+    const lines = wrapJsonLines(jsonToLines(json), Math.max(1, Math.floor(textWidth / CODE_CHAR_WIDTH)));
+    const height = codeBlockHeight(lines.length);
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width, height, direction: "vertical", padding: { top: 12, right: 14, bottom: 12, left: 14 }, fill: COLORS.codeBackground, cornerRadius: 4, spacing: 0 }, lines.map((line, index) => /* @__PURE__ */ figma.widget.h(Text, { key: index, width: textWidth, height: CODE_LINE_HEIGHT, fontFamily: "Roboto Mono", fontSize: CODE_FONT_SIZE, lineHeight: CODE_LINE_HEIGHT, fill: COLORS.white }, line.length > 0 ? line.map((chunk, chunkIndex) => /* @__PURE__ */ figma.widget.h(Span, { key: chunkIndex, fill: chunkColor(chunk) }, chunk.text)) : " ")));
+  }
+  function ResponseItem({ response }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: RESPONSE_ROW_GAP, overflow: "visible", verticalAlignItems: "start" }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: RESPONSE_CODE_LABEL_WIDTH, height: 32, horizontalAlignItems: "center", verticalAlignItems: "center", fill: COLORS.white, stroke: COLORS.divider, strokeWidth: 1, cornerRadius: 4 }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 16, fontWeight: "bold", fill: COLORS.text }, response.code)), /* @__PURE__ */ figma.widget.h(CodeBlock, { json: response.exampleJson, maxWidth: RESPONSE_CODE_MAX_WIDTH }));
   }
   function ActionButton({ label, onClick }) {
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { height: 30, padding: { left: 12, right: 12 }, cornerRadius: 4, fill: COLORS.paleGreen, stroke: COLORS.borderGreen, strokeWidth: 1, verticalAlignItems: "center", horizontalAlignItems: "center", onClick }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 12, fontWeight: "bold", fill: COLORS.text }, label));
@@ -659,14 +717,40 @@
     if (chunk.kind === "string") return COLORS.codeString;
     return COLORS.white;
   }
-  function codeBlockWidth(json) {
+  function codeBlockWidth(json, maxWidth) {
     const longestLine = json.split("\n").reduce((longest, line) => Math.max(longest, line.length), 0);
     const estimatedWidth = Math.ceil(longestLine * CODE_CHAR_WIDTH + CODE_HORIZONTAL_PADDING);
-    return Math.min(Math.max(CODE_MIN_WIDTH, estimatedWidth), CODE_MAX_WIDTH);
+    return Math.min(Math.max(CODE_MIN_WIDTH, estimatedWidth), maxWidth);
   }
-  function codeBlockHeight(json) {
-    const lineCount = Math.max(1, json.split("\n").length);
+  function codeBlockHeight(lineCount) {
     return lineCount * CODE_LINE_HEIGHT + CODE_VERTICAL_PADDING;
+  }
+  function wrapJsonLines(lines, maxCharacters) {
+    return lines.flatMap((line) => wrapJsonLine(line, maxCharacters));
+  }
+  function wrapJsonLine(line, maxCharacters) {
+    if (line.length === 0) return [[]];
+    const wrapped = [];
+    let currentLine = [];
+    let currentLength = 0;
+    for (const chunk of line) {
+      let remainingText = chunk.text;
+      while (remainingText.length > 0) {
+        const available = maxCharacters - currentLength;
+        if (available <= 0) {
+          wrapped.push(currentLine);
+          currentLine = [];
+          currentLength = 0;
+          continue;
+        }
+        const nextText = remainingText.slice(0, available);
+        currentLine.push(__spreadProps(__spreadValues({}, chunk), { text: nextText }));
+        currentLength += nextText.length;
+        remainingText = remainingText.slice(nextText.length);
+      }
+    }
+    wrapped.push(currentLine);
+    return wrapped;
   }
   async function loadEndpoint(input, forceFetch = false) {
     const spec = await fetchSpec(input.swaggerUrl, forceFetch);
@@ -712,11 +796,13 @@
     if (typeof candidate.swaggerUrl !== "string") return void 0;
     if (typeof candidate.path !== "string") return void 0;
     if (typeof candidate.method !== "string") return void 0;
+    const responseCodes = Array.isArray(candidate.responseCodes) ? candidate.responseCodes.filter((code) => typeof code === "string") : void 0;
     return {
       type: "generate",
       swaggerUrl: candidate.swaggerUrl,
       path: candidate.path,
-      method: normalizeMethod(candidate.method)
+      method: normalizeMethod(candidate.method),
+      responseCodes
     };
   }
   async function readVariableConfig() {
@@ -758,7 +844,8 @@
     return {
       swaggerUrl: config.swaggerUrl,
       method: config.method,
-      path: config.path
+      path: config.path,
+      responseCodes: config.responseCodes
     };
   }
   function variableStringValue(variables, name) {

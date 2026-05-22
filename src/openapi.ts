@@ -4,6 +4,7 @@ export type GenerateInput = {
   swaggerUrl: string;
   path: string;
   method: HttpMethod;
+  responseCodes?: string[];
 };
 
 export type SwaggerAction = {
@@ -14,6 +15,7 @@ export type SwaggerAction = {
   tag?: string;
   summary?: string;
   description?: string;
+  responseCodes: string[];
   searchIndex: string;
 };
 
@@ -23,7 +25,9 @@ export type EndpointViewModel = {
   path: string;
   operationId?: string;
   tag?: string;
+  description?: string;
   request?: BodyExample;
+  responses: ResponseExample[];
   response: ResponseExample;
 };
 
@@ -72,7 +76,7 @@ export function buildEndpointViewModel(spec: unknown, input: GenerateInput): End
   }
 
   const request = extractRequestExample(root, pathItem, operation);
-  const response = extractResponseExample(root, operation);
+  const responses = extractResponseExamples(root, operation, input.responseCodes);
 
   return {
     swaggerUrl: input.swaggerUrl,
@@ -80,8 +84,10 @@ export function buildEndpointViewModel(spec: unknown, input: GenerateInput): End
     path: input.path,
     operationId: asString(operation.operationId),
     tag: firstString(operation.tags),
+    description: asString(operation.description),
     request,
-    response
+    responses,
+    response: responses[0]
   };
 }
 
@@ -102,6 +108,7 @@ export function extractSwaggerActions(spec: unknown): SwaggerAction[] {
       const tag = firstString(operation.tags);
       const summary = asString(operation.summary);
       const description = asString(operation.description);
+      const responseCodes = extractResponseCodes(operation);
       const label = `${method} ${path}`;
       const searchIndex = [
         method,
@@ -120,6 +127,7 @@ export function extractSwaggerActions(spec: unknown): SwaggerAction[] {
         tag,
         summary,
         description,
+        responseCodes,
         searchIndex
       }];
     });
@@ -169,15 +177,45 @@ function extractRequestExample(root: JsonObject, pathItem: JsonObject, operation
   };
 }
 
-function extractResponseExample(root: JsonObject, operation: JsonObject): ResponseExample {
-  const responses = asObject(operation.responses, "responses");
-  const code = responses["200"] ? "200" : Object.keys(responses).find((candidate) => candidate.startsWith("2"));
+function extractResponseCodes(operation: JsonObject): string[] {
+  const responses = asOptionalObject(operation.responses);
+  return responses ? sortedResponseCodes(Object.keys(responses)) : [];
+}
 
-  if (!code) {
-    throw new Error("No 200 or other 2xx response was found for this operation.");
+function extractResponseExamples(root: JsonObject, operation: JsonObject, selectedCodes: string[] | undefined): ResponseExample[] {
+  const responses = asObject(operation.responses, "responses");
+  const codes = chooseResponseCodes(responses, selectedCodes);
+  return codes.map((code) => extractResponseExample(root, operation, responses, code));
+}
+
+function chooseResponseCodes(responses: JsonObject, selectedCodes: string[] | undefined): string[] {
+  const availableCodes = sortedResponseCodes(Object.keys(responses));
+
+  if (availableCodes.length === 0) {
+    throw new Error("No responses were found for this operation.");
   }
 
-  const response = asObject(responses[code], `response ${code}`);
+  const requestedCodes = (selectedCodes ?? []).map((code) => code.trim()).filter(Boolean);
+
+  if (requestedCodes.length > 0) {
+    const missingCode = requestedCodes.find((code) => !Object.prototype.hasOwnProperty.call(responses, code));
+    if (missingCode) {
+      throw new Error(`Response code "${missingCode}" was not found for this operation.`);
+    }
+
+    return requestedCodes;
+  }
+
+  if (availableCodes.length === 1) {
+    return availableCodes;
+  }
+
+  return [availableCodes.includes("200") ? "200" : availableCodes[0]];
+}
+
+function extractResponseExample(root: JsonObject, operation: JsonObject, responses: JsonObject, code: string): ResponseExample {
+  const responseObject = asObject(responses[code], `response ${code}`);
+  const response = asObject(resolveMaybeRef(root, responseObject), `response ${code}`);
   const content = asOptionalObject(response.content);
   const chosen = chooseContent(content);
 
@@ -205,6 +243,18 @@ function extractResponseExample(root: JsonObject, operation: JsonObject): Respon
     example,
     exampleJson: stringifyExample(example)
   };
+}
+
+function sortedResponseCodes(codes: string[]): string[] {
+  return [...codes].sort((left, right) => {
+    const leftIsNumeric = /^\d+$/.test(left);
+    const rightIsNumeric = /^\d+$/.test(right);
+
+    if (leftIsNumeric && rightIsNumeric) return Number(left) - Number(right);
+    if (leftIsNumeric) return -1;
+    if (rightIsNumeric) return 1;
+    return left.localeCompare(right);
+  });
 }
 
 export function exampleFromSchema(root: unknown, schema: unknown, depth = 0, seen = new Set<string>()): unknown {

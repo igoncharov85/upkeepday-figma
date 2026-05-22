@@ -54,7 +54,7 @@
 
       .row {
         display: grid;
-        grid-template-columns: 70px 1fr;
+        grid-template-columns: 90px 1fr;
         gap: 10px;
       }
 
@@ -152,6 +152,47 @@
         font-weight: 700;
       }
 
+      .response-panel {
+        display: none;
+        gap: 6px;
+      }
+
+      .response-panel.visible {
+        display: grid;
+      }
+
+      .response-label {
+        color: #2f3442;
+        font-weight: 700;
+      }
+
+      .response-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .response-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        min-height: 28px;
+        border: 1px solid #d9dce2;
+        border-radius: 6px;
+        padding: 4px 8px;
+        color: #2f3442;
+        background: #ffffff;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .response-option input {
+        width: 13px;
+        height: 13px;
+        margin: 0;
+        padding: 0;
+      }
+
       .actions {
         display: flex;
         justify-content: flex-end;
@@ -224,7 +265,7 @@
             id="swaggerUrl"
             name="swaggerUrl"
             type="url"
-            value="https://api.upkeepday.com/swagger.json"
+            value="https://petstore3.swagger.io/api/v3/openapi.json"
             required
           />
         </label>
@@ -254,6 +295,11 @@
         </label>
       </div>
 
+      <div id="responsePanel" class="response-panel">
+        <div class="response-label">Responses</div>
+        <div id="responseOptions" class="response-options"></div>
+      </div>
+
       <div id="message" class="message"></div>
 
       <div class="actions">
@@ -276,8 +322,12 @@
       const searchPanel = document.getElementById("searchPanel");
       const search = document.getElementById("search");
       const results = document.getElementById("results");
+      const responsePanel = document.getElementById("responsePanel");
+      const responseOptions = document.getElementById("responseOptions");
       let actions = [];
       let selectedActionKey = "";
+      let responseCodes = [];
+      let selectedResponseCodes = [];
 
       function setMessage(text, state) {
         message.textContent = text;
@@ -322,6 +372,14 @@
       function validateMethod() {
         if (!method.value) {
           return "Select a method.";
+        }
+
+        return "";
+      }
+
+      function validateResponseCodes() {
+        if (responseCodes.length > 1 && selectedResponseCodes.length === 0) {
+          return "Select at least one response code.";
         }
 
         return "";
@@ -375,6 +433,7 @@
         selectedActionKey = actionKey(action);
         method.value = action.method;
         path.value = action.path;
+        applyResponseCodes(action.responseCodes);
         clearMessage();
         renderResults();
       }
@@ -383,9 +442,75 @@
         return `${action.method} ${action.path}`;
       }
 
+      function findCurrentAction() {
+        const selectedMethod = method.value;
+        const selectedPath = path.value.trim();
+        return actions.find((action) => action.method === selectedMethod && action.path === selectedPath);
+      }
+
+      function updateSelectedActionFromFields() {
+        const action = findCurrentAction();
+        selectedActionKey = action ? actionKey(action) : "";
+        applyResponseCodes(action ? action.responseCodes : [], selectedResponseCodes);
+        renderResults();
+      }
+
+      function applyResponseCodes(codes, preferredCodes) {
+        responseCodes = Array.isArray(codes) ? codes.filter((code) => typeof code === "string" && code.trim()) : [];
+
+        const preferred = Array.isArray(preferredCodes)
+          ? preferredCodes.filter((code) => responseCodes.includes(code))
+          : [];
+        selectedResponseCodes = preferred.length > 0 ? preferred : defaultSelectedResponseCodes(responseCodes);
+        renderResponseCodes();
+      }
+
+      function defaultSelectedResponseCodes(codes) {
+        if (codes.length === 0) return [];
+        if (codes.length === 1) return [codes[0]];
+        return [codes.includes("200") ? "200" : codes[0]];
+      }
+
+      function renderResponseCodes() {
+        responseOptions.innerHTML = "";
+
+        if (responseCodes.length <= 1) {
+          responsePanel.classList.remove("visible");
+          return;
+        }
+
+        responsePanel.classList.add("visible");
+
+        for (const code of responseCodes) {
+          const label = document.createElement("label");
+          label.className = "response-option";
+
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.value = code;
+          checkbox.checked = selectedResponseCodes.includes(code);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) {
+              selectedResponseCodes = [...new Set([...selectedResponseCodes, code])];
+            } else {
+              const nextCodes = selectedResponseCodes.filter((selectedCode) => selectedCode !== code);
+              if (nextCodes.length === 0) {
+                checkbox.checked = true;
+                return;
+              }
+              selectedResponseCodes = nextCodes;
+            }
+          });
+
+          label.appendChild(checkbox);
+          label.appendChild(document.createTextNode(code));
+          responseOptions.appendChild(label);
+        }
+      }
+
       form.addEventListener("submit", (event) => {
         event.preventDefault();
-        const error = validateUrl() || validateMethod() || validatePath();
+        const error = validateUrl() || validateMethod() || validatePath() || validateResponseCodes();
 
         if (error) {
           setMessage(error, "error");
@@ -399,7 +524,8 @@
             type: "generate",
             swaggerUrl: swaggerUrl.value.trim(),
             method: method.value,
-            path: path.value.trim()
+            path: path.value.trim(),
+            responseCodes: selectedResponseCodes
           }
         }, "*");
       });
@@ -423,6 +549,8 @@
       });
 
       search.addEventListener("input", renderResults);
+      method.addEventListener("change", updateSelectedActionFromFields);
+      path.addEventListener("input", updateSelectedActionFromFields);
 
       cancel.addEventListener("click", () => {
         parent.postMessage({ pluginMessage: { type: "cancel" } }, "*");
@@ -450,10 +578,12 @@
 
         if (pluginMessage.type === "actions") {
           actions = pluginMessage.actions || [];
-          selectedActionKey = "";
+          const currentAction = findCurrentAction();
+          selectedActionKey = currentAction ? actionKey(currentAction) : "";
           searchPanel.classList.add("visible");
           search.value = "";
           search.placeholder = `Search ${actions.length} actions...`;
+          applyResponseCodes(currentAction ? currentAction.responseCodes : [], selectedResponseCodes);
           renderResults();
           clearMessage();
         }
@@ -466,6 +596,8 @@
             swaggerUrl.value = pluginMessage.config.swaggerUrl;
             method.value = pluginMessage.config.method;
             path.value = pluginMessage.config.path;
+            selectedResponseCodes = pluginMessage.config.responseCodes || [];
+            applyResponseCodes([], selectedResponseCodes);
             clearMessage();
           }
         }

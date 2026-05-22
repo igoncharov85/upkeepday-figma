@@ -9,10 +9,15 @@ const swaggerFixture = {
     "/student/todos/action": {
       post: {
         summary: "Action on student todo",
+        description: "Runs an action on a student todo item.",
         responses: {
           "200": {
             description: "Success",
             schema: { $ref: "#/definitions/StudentToDos.MessageStatusOut" }
+          },
+          "400": {
+            description: "Invalid request",
+            schema: { $ref: "#/definitions/ErrorOut" }
           }
         },
         operationId: "post_action_on_to_do_route",
@@ -66,6 +71,12 @@ const swaggerFixture = {
         }
       },
       type: "object"
+    },
+    ErrorOut: {
+      properties: {
+        Error: { type: "string" }
+      },
+      type: "object"
     }
   }
 };
@@ -81,7 +92,8 @@ describe("extractSwaggerActions", () => {
       label: "POST /student/todos/action",
       operationId: "post_action_on_to_do_route",
       tag: "Student ToDos",
-      summary: "Action on student todo"
+      summary: "Action on student todo",
+      responseCodes: ["200", "400"]
     });
     expect(actions[0].searchIndex).toContain("/student/todos/action");
     expect(actions[0].searchIndex).toContain("post_action_on_to_do_route");
@@ -145,6 +157,26 @@ describe("buildEndpointViewModel", () => {
     });
     expect(model.response.exampleJson).toBe('{\n  "Message": "string",\n  "Status": "Success"\n}');
     expect(model.response.code).toBe("200");
+    expect(model.responses.map((response) => response.code)).toEqual(["200"]);
+    expect(model.description).toBe("Runs an action on a student todo item.");
+  });
+
+  it("builds examples for selected response codes", () => {
+    const model = buildEndpointViewModel(swaggerFixture, {
+      swaggerUrl: "https://api.upkeepday.com/swagger.json",
+      path: "/student/todos/action",
+      method: "POST",
+      responseCodes: ["200", "400"]
+    });
+
+    expect(model.responses.map((response) => response.code)).toEqual(["200", "400"]);
+    expect(model.responses[0].example).toEqual({
+      Message: "string",
+      Status: "Success"
+    });
+    expect(model.responses[1].example).toEqual({
+      Error: "string"
+    });
   });
 
   it("builds OpenAPI 3 request and response examples", () => {
@@ -191,6 +223,7 @@ describe("buildEndpointViewModel", () => {
 
     expect(model.request?.example).toEqual({ name: "string", active: true });
     expect(model.response.example).toEqual([0]);
+    expect(model.description).toBeUndefined();
   });
 
   it("throws a useful error for missing operations", () => {

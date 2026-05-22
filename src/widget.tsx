@@ -5,12 +5,15 @@ import widgetIcon from "../assets/upkeepday-widget-icon.png";
 const { widget } = figma;
 const { AutoLayout, Image, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
 
-const DEFAULT_SWAGGER_URL = "https://api.upkeepday.com/swagger.json";
+const DEFAULT_SWAGGER_URL = "https://petstore3.swagger.io/api/v3/openapi.json";
 const LAST_CONFIG_STORAGE_KEY = "openapi-mini-viewer:last-config";
 
 const CARD_WIDTH = 760;
 const CODE_MIN_WIDTH = CARD_WIDTH - 12;
 const CODE_MAX_WIDTH = 1800;
+const RESPONSE_CODE_LABEL_WIDTH = 58;
+const RESPONSE_ROW_GAP = 8;
+const RESPONSE_CODE_MAX_WIDTH = CARD_WIDTH - 12 - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
 const CODE_FONT_SIZE = 14;
 const CODE_LINE_HEIGHT = 20;
 const CODE_HORIZONTAL_PADDING = 28;
@@ -45,6 +48,7 @@ type WidgetConfig = {
   swaggerUrl: string;
   method: HttpMethod | "";
   path: string;
+  responseCodes: string[];
 };
 
 let cachedSpecUrl = "";
@@ -55,13 +59,15 @@ function OpenApiMiniViewerWidget() {
   const [swaggerUrl, setSwaggerUrl] = useSyncedState("swaggerUrl", DEFAULT_SWAGGER_URL);
   const [method, setMethod] = useSyncedState<HttpMethod | "">("method", "");
   const [path, setPath] = useSyncedState("path", "");
+  const [responseCodes, setResponseCodes] = useSyncedState<string[]>("responseCodes", []);
   const [model, setModel] = useSyncedState<EndpointViewModel | null>("model", null);
   const [error, setError] = useSyncedState("error", "");
   const [loadingMessage, setLoadingMessage] = useSyncedState("loadingMessage", "");
   const [initialized, setInitialized] = useSyncedState("initialized", false);
   const [lastUpdatedAt, setLastUpdatedAt] = useSyncedState("lastUpdatedAt", "");
 
-  const config: WidgetConfig = { swaggerUrl, method, path };
+  const config: WidgetConfig = { swaggerUrl, method, path, responseCodes };
+  const displayedResponses = model?.responses ?? (model?.response ? [model.response] : []);
 
   useEffect(() => {
     if (initialized) return;
@@ -72,12 +78,14 @@ function OpenApiMiniViewerWidget() {
       const nextConfig: WidgetConfig = {
         swaggerUrl: savedSwaggerUrl ?? variableConfig.swaggerUrl ?? swaggerUrl,
         method: variableConfig.method ?? "",
-        path: variableConfig.path ?? ""
+        path: variableConfig.path ?? "",
+        responseCodes: []
       };
 
       setSwaggerUrl(nextConfig.swaggerUrl);
       setMethod(nextConfig.method);
       setPath(nextConfig.path);
+      setResponseCodes(nextConfig.responseCodes);
       setInitialized(true);
       openConfigure(nextConfig, Boolean(model));
     })());
@@ -113,6 +121,7 @@ function OpenApiMiniViewerWidget() {
     setSwaggerUrl(nextConfig.swaggerUrl);
     setMethod(nextConfig.method);
     setPath(nextConfig.path);
+    setResponseCodes(nextConfig.responseCodes);
     try {
       await renderEndpoint(requireRenderableConfig(nextConfig));
     } catch (renderError) {
@@ -174,6 +183,7 @@ function OpenApiMiniViewerWidget() {
     >
       {model?.tag ? <Title tag={model.tag} /> : null}
       <Header method={model?.method ?? method} path={model?.path ?? path} />
+      {model?.description ? <EndpointDescription description={model.description} /> : null}
       {loadingMessage ? <StatusMessage message={loadingMessage} tone="muted" /> : null}
       {error ? <StatusMessage message={error} tone="error" /> : null}
       {!model ? <StatusMessage message="Configure or refresh to render an OpenAPI endpoint." tone="muted" /> : null}
@@ -185,7 +195,9 @@ function OpenApiMiniViewerWidget() {
           </SectionBody>
           <SectionTitle title="Responses" />
           <SectionBody>
-            <CodeBlock json={model.response.exampleJson} />
+            <AutoLayout direction="vertical" spacing={8} overflow="visible">
+              {displayedResponses.map((response) => <ResponseItem key={response.code} response={response} />)}
+            </AutoLayout>
           </SectionBody>
         </>
       ) : null}
@@ -239,12 +251,13 @@ function OpenApiMiniViewerWidget() {
         sessionConfig = {
           swaggerUrl: payload.swaggerUrl,
           method: normalizeMethod(payload.method),
-          path: payload.path
+          path: payload.path,
+          responseCodes: payload.responseCodes ?? []
         };
         waitForTask(applyConfigAndRender(sessionConfig));
       };
 
-      figma.showUI(__html__, { width: 380, height: 398, themeColors: true });
+      figma.showUI(__html__, { width: 380, height: 430, themeColors: true });
       figma.ui.postMessage({
         type: "selection",
         canRefresh,
@@ -273,6 +286,14 @@ function Header({ method, path }: { method: HttpMethod | ""; path: string }) {
   );
 }
 
+function EndpointDescription({ description }: { description: string }) {
+  return (
+    <AutoLayout width={CARD_WIDTH} padding={{ top: 22, right: 32, bottom: 22, left: 32 }} fill={COLORS.paleGreen} overflow="visible">
+      <Text width={CARD_WIDTH - 64} fontSize={20} lineHeight={28} fill={COLORS.text}>{description}</Text>
+    </AutoLayout>
+  );
+}
+
 function SectionTitle({ title }: { title: string }) {
   return (
     <AutoLayout width={CARD_WIDTH} padding={{ top: 6, right: 6, bottom: 4, left: 6 }} fill={COLORS.white}>
@@ -289,18 +310,30 @@ function SectionBody({ children }: { children: FigmaDeclarativeNode }) {
   );
 }
 
-function CodeBlock({ json }: { json: string }) {
-  const width = codeBlockWidth(json);
-  const height = codeBlockHeight(json);
-  const lines = jsonToLines(json);
+function CodeBlock({ json, maxWidth = CODE_MAX_WIDTH }: { json: string; maxWidth?: number }) {
+  const width = codeBlockWidth(json, maxWidth);
+  const textWidth = width - CODE_HORIZONTAL_PADDING;
+  const lines = wrapJsonLines(jsonToLines(json), Math.max(1, Math.floor(textWidth / CODE_CHAR_WIDTH)));
+  const height = codeBlockHeight(lines.length);
 
   return (
     <AutoLayout width={width} height={height} direction="vertical" padding={{ top: 12, right: 14, bottom: 12, left: 14 }} fill={COLORS.codeBackground} cornerRadius={4} spacing={0}>
       {lines.map((line, index) => (
-        <Text key={index} width={width - CODE_HORIZONTAL_PADDING} height={CODE_LINE_HEIGHT} fontFamily="Roboto Mono" fontSize={CODE_FONT_SIZE} lineHeight={CODE_LINE_HEIGHT} fill={COLORS.white}>
+        <Text key={index} width={textWidth} height={CODE_LINE_HEIGHT} fontFamily="Roboto Mono" fontSize={CODE_FONT_SIZE} lineHeight={CODE_LINE_HEIGHT} fill={COLORS.white}>
           {line.length > 0 ? line.map((chunk, chunkIndex) => <Span key={chunkIndex} fill={chunkColor(chunk)}>{chunk.text}</Span>) : " "}
         </Text>
       ))}
+    </AutoLayout>
+  );
+}
+
+function ResponseItem({ response }: { response: EndpointViewModel["responses"][number] }) {
+  return (
+    <AutoLayout direction="horizontal" spacing={RESPONSE_ROW_GAP} overflow="visible" verticalAlignItems="start">
+      <AutoLayout width={RESPONSE_CODE_LABEL_WIDTH} height={32} horizontalAlignItems="center" verticalAlignItems="center" fill={COLORS.white} stroke={COLORS.divider} strokeWidth={1} cornerRadius={4}>
+        <Text fontSize={16} fontWeight="bold" fill={COLORS.text}>{response.code}</Text>
+      </AutoLayout>
+      <CodeBlock json={response.exampleJson} maxWidth={RESPONSE_CODE_MAX_WIDTH} />
     </AutoLayout>
   );
 }
@@ -339,15 +372,49 @@ function chunkColor(chunk: JsonChunk): string {
   return COLORS.white;
 }
 
-function codeBlockWidth(json: string): number {
+function codeBlockWidth(json: string, maxWidth: number): number {
   const longestLine = json.split("\n").reduce((longest, line) => Math.max(longest, line.length), 0);
   const estimatedWidth = Math.ceil(longestLine * CODE_CHAR_WIDTH + CODE_HORIZONTAL_PADDING);
-  return Math.min(Math.max(CODE_MIN_WIDTH, estimatedWidth), CODE_MAX_WIDTH);
+  return Math.min(Math.max(CODE_MIN_WIDTH, estimatedWidth), maxWidth);
 }
 
-function codeBlockHeight(json: string): number {
-  const lineCount = Math.max(1, json.split("\n").length);
+function codeBlockHeight(lineCount: number): number {
   return lineCount * CODE_LINE_HEIGHT + CODE_VERTICAL_PADDING;
+}
+
+function wrapJsonLines(lines: JsonChunk[][], maxCharacters: number): JsonChunk[][] {
+  return lines.flatMap((line) => wrapJsonLine(line, maxCharacters));
+}
+
+function wrapJsonLine(line: JsonChunk[], maxCharacters: number): JsonChunk[][] {
+  if (line.length === 0) return [[]];
+
+  const wrapped: JsonChunk[][] = [];
+  let currentLine: JsonChunk[] = [];
+  let currentLength = 0;
+
+  for (const chunk of line) {
+    let remainingText = chunk.text;
+
+    while (remainingText.length > 0) {
+      const available = maxCharacters - currentLength;
+
+      if (available <= 0) {
+        wrapped.push(currentLine);
+        currentLine = [];
+        currentLength = 0;
+        continue;
+      }
+
+      const nextText = remainingText.slice(0, available);
+      currentLine.push({ ...chunk, text: nextText });
+      currentLength += nextText.length;
+      remainingText = remainingText.slice(nextText.length);
+    }
+  }
+
+  wrapped.push(currentLine);
+  return wrapped;
 }
 
 async function loadEndpoint(input: GenerateInput, forceFetch = false): Promise<EndpointViewModel> {
@@ -406,11 +473,16 @@ function parseMessage(message: unknown): PluginMessage | undefined {
   if (typeof candidate.path !== "string") return undefined;
   if (typeof candidate.method !== "string") return undefined;
 
+  const responseCodes = Array.isArray(candidate.responseCodes)
+    ? candidate.responseCodes.filter((code): code is string => typeof code === "string")
+    : undefined;
+
   return {
     type: "generate",
     swaggerUrl: candidate.swaggerUrl,
     path: candidate.path,
-    method: normalizeMethod(candidate.method)
+    method: normalizeMethod(candidate.method),
+    responseCodes
   };
 }
 
@@ -462,7 +534,8 @@ function requireRenderableConfig(config: WidgetConfig): GenerateInput {
   return {
     swaggerUrl: config.swaggerUrl,
     method: config.method,
-    path: config.path
+    path: config.path,
+    responseCodes: config.responseCodes
   };
 }
 
