@@ -302,7 +302,7 @@ function Header({ method, path, cardWidth, widthMode }: { method: HttpMethod | "
         <AutoLayout width={118} height={42} horizontalAlignItems="center" verticalAlignItems="center" cornerRadius={4} fill={methodColor(method)}>
           <Text fontSize={20} fontWeight="bold" fill={COLORS.white}>{method}</Text>
         </AutoLayout>
-        <Text width={cardWidth - 20} fontSize={17} lineHeight={28} fontWeight="bold" fill={COLORS.text}>{path}</Text>
+        <Text width={cardWidth - 20} fontSize={compactPathFontSize(path)} lineHeight={28} fontWeight="bold" fill={COLORS.text}>{path}</Text>
       </AutoLayout>
     );
   }
@@ -405,6 +405,16 @@ function cardWidthForMode(mode: WidthMode): number {
 
 function widthModeLabel(mode: WidthMode): string {
   return WIDTH_OPTIONS.find((option) => option.option === mode)?.label ?? "Standard";
+}
+
+function compactPathFontSize(path: string): number {
+  const length = path.length;
+  if (length >= 40) return 17;
+  if (length >= 37) return 18;
+  if (length >= 33) return 19;
+  if (length >= 29) return 20;
+  if (length >= 25) return 21;
+  return 22;
 }
 
 function errorMessage(rawError: unknown): string {

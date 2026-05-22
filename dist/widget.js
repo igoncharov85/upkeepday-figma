@@ -690,7 +690,7 @@
   }
   function Header({ method, path, cardWidth, widthMode }) {
     if (widthMode === "compact") {
-      return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, direction: "vertical", spacing: 8, padding: { top: 8, right: 10, bottom: 10, left: 10 }, fill: COLORS.paleGreen, overflow: "visible" }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: cardWidth - 20, fontSize: 17, lineHeight: 28, fontWeight: "bold", fill: COLORS.text }, path));
+      return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, direction: "vertical", spacing: 8, padding: { top: 8, right: 10, bottom: 10, left: 10 }, fill: COLORS.paleGreen, overflow: "visible" }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: cardWidth - 20, fontSize: compactPathFontSize(path), lineHeight: 28, fontWeight: "bold", fill: COLORS.text }, path));
     }
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, height: 56, direction: "horizontal", spacing: 16, padding: { top: 8, right: 10, bottom: 8, left: 4 }, verticalAlignItems: "center", fill: COLORS.paleGreen }, /* @__PURE__ */ figma.widget.h(AutoLayout, { width: 118, height: 42, horizontalAlignItems: "center", verticalAlignItems: "center", cornerRadius: 4, fill: methodColor(method) }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 20, fontWeight: "bold", fill: COLORS.white }, method)), /* @__PURE__ */ figma.widget.h(Text, { width: cardWidth - 154, fontSize: 27, fontWeight: "bold", fill: COLORS.text }, path));
   }
@@ -733,6 +733,15 @@
   function widthModeLabel(mode) {
     var _a, _b;
     return (_b = (_a = WIDTH_OPTIONS.find((option) => option.option === mode)) == null ? void 0 : _a.label) != null ? _b : "Standard";
+  }
+  function compactPathFontSize(path) {
+    const length = path.length;
+    if (length >= 40) return 17;
+    if (length >= 37) return 18;
+    if (length >= 33) return 19;
+    if (length >= 29) return 20;
+    if (length >= 25) return 21;
+    return 22;
   }
   function errorMessage(rawError) {
     return rawError instanceof Error ? rawError.message : "Something went wrong.";
