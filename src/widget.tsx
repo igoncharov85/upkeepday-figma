@@ -1,6 +1,10 @@
 import { buildEndpointViewModel, extractSwaggerActions, normalizeMethod, type EndpointViewModel, type GenerateInput, type HttpMethod, type SwaggerAction } from "./openapi";
 import { jsonToLines, type JsonChunk } from "./widgetJson";
 import widgetIcon from "../assets/upkeepday-widget-icon.png";
+import copyIcon from "../assets/copy-alt.png";
+import refreshIcon from "../assets/refresh-icon.png";
+import settingsIcon from "../assets/settings-icon.png";
+import widthChevronIcon from "../assets/width-chevron-icon.png";
 
 const { widget } = figma;
 const { AutoLayout, Image, Text, Span, useEffect, usePropertyMenu, useSyncedState, useWidgetNodeId, waitForTask } = widget;
@@ -77,6 +81,7 @@ function OpenApiMiniViewerWidget() {
   const cardWidth = cardWidthForMode(widthMode);
   const codeMaxWidth = cardWidth - 12;
   const responseCodeMaxWidth = codeMaxWidth - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
+  const copyablePath = (model?.path ?? path).trim();
 
   useEffect(() => {
     if (initialized) return;
@@ -221,8 +226,9 @@ function OpenApiMiniViewerWidget() {
       ) : null}
       <AutoLayout direction="horizontal" spacing={6} padding={{ top: 6, right: 6, bottom: 6, left: 6 }} fill={COLORS.white} width={cardWidth} verticalAlignItems="center">
         <Image name="UpKeepDay Icon" src={widgetIcon} width={16} height={16} />
-        <ActionButton label="Configure" onClick={() => openConfigure(config, Boolean(model))} />
-        <ActionButton label="Refresh" onClick={() => waitForTask(refreshConfig(config))} />
+        <IconActionButton label="Configure" iconSrc={settingsIcon} onClick={() => openConfigure(config, Boolean(model))} />
+        <IconActionButton label="Refresh" iconSrc={refreshIcon} onClick={() => waitForTask(refreshConfig(config))} />
+        {copyablePath ? <IconActionButton label="Copy Path" iconSrc={copyIcon} onClick={() => openCopyPathDialog(copyablePath)} /> : null}
         <WidthButton mode={widthMode} onClick={() => setWidthMode(nextWidthMode(widthMode))} />
         {lastUpdatedAt ? <Text fontSize={10} fill={COLORS.text}>{formatUpdatedAt(lastUpdatedAt)}</Text> : null}
       </AutoLayout>
@@ -283,6 +289,42 @@ function OpenApiMiniViewerWidget() {
         config: currentConfig,
         autoLoadSpec: Boolean(currentConfig.swaggerUrl.trim())
       });
+    }));
+  }
+
+  function openCopyPathDialog(pathToCopy: string): void {
+    waitForTask(new Promise<void>((resolve) => {
+      let isClosed = false;
+
+      const closeSession = () => {
+        if (isClosed) return;
+        isClosed = true;
+        figma.ui.hide();
+        resolve();
+      };
+
+      figma.ui.onmessage = (message: unknown) => {
+        if (typeof message !== "object" || message === null) return;
+        const payload = message as Record<string, unknown>;
+
+        if (payload.type === "copied") {
+          figma.notify("Path copied.");
+          closeSession();
+          return;
+        }
+
+        if (payload.type === "copy-error") {
+          figma.notify(typeof payload.message === "string" ? payload.message : "Unable to copy path.");
+          closeSession();
+          return;
+        }
+
+        if (payload.type === "close") {
+          closeSession();
+        }
+      };
+
+      figma.showUI(copyPathDialogHtml(pathToCopy), { width: 260, height: 104, themeColors: true });
     }));
   }
 }
@@ -369,18 +411,30 @@ function ResponseItem({ response, codeMaxWidth }: { response: EndpointViewModel[
   );
 }
 
-function ActionButton({ label, onClick }: { label: string; onClick: () => void }) {
+function IconActionButton({ label, iconSrc, onClick }: { label: string; iconSrc: string; onClick: () => void }) {
   return (
-    <AutoLayout height={28} padding={{ left: 10, right: 10 }} cornerRadius={4} fill={COLORS.paleGreen} stroke={COLORS.borderGreen} strokeWidth={1} verticalAlignItems="center" horizontalAlignItems="center" onClick={onClick}>
-      <Text fontSize={11} fontWeight="bold" fill={COLORS.text}>{label}</Text>
+    <AutoLayout
+      name={label}
+      width={28}
+      height={28}
+      cornerRadius={4}
+      fill={COLORS.paleGreen}
+      stroke={COLORS.borderGreen}
+      strokeWidth={1}
+      verticalAlignItems="center"
+      horizontalAlignItems="center"
+      onClick={onClick}
+    >
+      <Image name={label} src={iconSrc} width={14} height={14} />
     </AutoLayout>
   );
 }
 
 function WidthButton({ mode, onClick }: { mode: WidthMode; onClick: () => void }) {
   return (
-    <AutoLayout height={28} padding={{ left: 8, right: 8 }} cornerRadius={4} fill={COLORS.white} stroke={COLORS.divider} strokeWidth={1} verticalAlignItems="center" horizontalAlignItems="center" onClick={onClick}>
-      <Text fontSize={11} fontWeight="bold" fill={COLORS.text}>{widthModeLabel(mode)} v</Text>
+    <AutoLayout height={28} padding={{ left: 8, right: 8 }} spacing={6} cornerRadius={4} fill={COLORS.white} stroke={COLORS.divider} strokeWidth={1} verticalAlignItems="center" horizontalAlignItems="center" onClick={onClick}>
+      <Text fontSize={11} fontWeight="bold" fill={COLORS.text}>{widthModeLabel(mode)}</Text>
+      <Image name="Width Menu" src={widthChevronIcon} width={12} height={12} />
     </AutoLayout>
   );
 }
@@ -415,6 +469,141 @@ function compactPathFontSize(path: string): number {
   if (length >= 29) return 20;
   if (length >= 25) return 21;
   return 22;
+}
+
+function copyPathDialogHtml(pathToCopy: string): string {
+  const pathJson = JSON.stringify(pathToCopy);
+  const iconJson = JSON.stringify(copyIcon);
+  const closeIconJson = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAMxJREFUeAHFlcsNwjAMhu1MkjE4wo0RuHayXhmBWzkyRjYJNglSBUlr17VqqVJru9+fp42n6y1mzCNmHF6Pe4IdbM4MQC/kO5Nj4gAYrcKnyhwDkAp9JHqiVWQGj8zkGWAncNEuV4+BawkWOMdQmrgF/iegFZHk4tYfpQNpCqwBNLPsCvRA7Nfs06JAS6S6RXCRQEMEQHGMAzjbsUvkusmux9T1ormWCtdi51quXRvOHvAlkW/TN8PZPiMudyVB6fGl6SPg0wr/FanM4Q2232Ehuj7+RgAAAABJRU5ErkJggg==";
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 14px;
+        color: #2f3442;
+        background: #ffffff;
+      }
+      .layout {
+        display: grid;
+        gap: 10px;
+      }
+      .path {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .copy-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .copy-button img {
+        width: 14px;
+        height: 14px;
+      }
+      .close-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .close-button img {
+        width: 14px;
+        height: 14px;
+      }
+      button {
+        height: 34px;
+        border: 1px solid #18a058;
+        border-radius: 6px;
+        padding: 0 12px;
+        color: #2f3442;
+        background: #e8f7ef;
+        font: inherit;
+        font-weight: 700;
+      }
+      .cancel {
+        border-color: #c8cbd2;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <div class="path">${escapeHtml(pathToCopy)}</div>
+      <div class="actions">
+        <span class="path-label">Path:</span>
+        <button class="copy-button" type="button" id="copy">Copy <img src=${iconJson} alt="" /></button>
+        <button class="cancel close-button" type="button" id="cancel">Close <img src=${closeIconJson} alt="" /></button>
+      </div>
+    </div>
+    <script>
+      const value = ${pathJson};
+      async function copyText(text) {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        try {
+          if (!document.execCommand("copy")) {
+            throw new Error("Unable to copy path.");
+          }
+        } finally {
+          document.body.removeChild(textarea);
+        }
+      }
+      document.getElementById("copy").addEventListener("click", async () => {
+        try {
+          await copyText(value);
+          parent.postMessage({ pluginMessage: { type: "copied" } }, "*");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to copy path.";
+          parent.postMessage({ pluginMessage: { type: "copy-error", message } }, "*");
+        }
+      });
+      document.getElementById("cancel").addEventListener("click", () => {
+        parent.postMessage({ pluginMessage: { type: "close" } }, "*");
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function errorMessage(rawError: unknown): string {

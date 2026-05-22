@@ -65,6 +65,43 @@
         align-items: end;
       }
 
+      .url-field {
+        display: block;
+      }
+
+      .path-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: end;
+      }
+
+      .icon-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        min-width: 34px;
+        padding: 0;
+      }
+
+      .icon-button img {
+        width: 16px;
+        height: 16px;
+      }
+
+      .button-with-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      .button-with-icon img {
+        width: 14px;
+        height: 14px;
+      }
+
       .search-panel {
         display: none;
         gap: 8px;
@@ -85,6 +122,7 @@
       .result {
         display: grid;
         grid-template-columns: auto 1fr;
+        align-items: center;
         gap: 8px;
         width: 100%;
         height: auto;
@@ -109,7 +147,11 @@
       }
 
       .method-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         min-width: 48px;
+        min-height: 20px;
         border-radius: 4px;
         padding: 3px 6px;
         color: #ffffff;
@@ -275,16 +317,15 @@
   <body>
     <form id="form">
       <div class="url-row">
-        <label>
-          Swagger/OpenAPI JSON URL
-          <input
-            id="swaggerUrl"
-            name="swaggerUrl"
-            type="url"
-            value="https://petstore3.swagger.io/api/v3/openapi.json"
-            required
-          />
-        </label>
+        <input
+          class="url-field"
+          id="swaggerUrl"
+          name="swaggerUrl"
+          type="url"
+          value="https://petstore3.swagger.io/api/v3/openapi.json"
+          placeholder="Swagger/OpenAPI JSON URL"
+          required
+        />
         <button class="secondary" type="button" id="loadSpec">Load</button>
       </div>
 
@@ -311,7 +352,10 @@
 
         <label>
           Path
-          <input id="path" name="path" type="text" value="" required />
+          <div class="path-row">
+            <input id="path" name="path" type="text" value="" placeholder="Select/enter action..." required />
+            <button class="secondary icon-button" type="button" id="copyPath" title="Copy path" aria-label="Copy path"></button>
+          </div>
         </label>
       </div>
 
@@ -320,19 +364,20 @@
         <div id="responseOptions" class="response-options"></div>
       </div>
 
-      <div id="message" class="message"></div>
-
       <div class="actions">
         <button class="refresh" type="button" id="refresh" disabled>Refresh</button>
         <button class="secondary" type="button" id="cancel">Cancel</button>
         <button class="primary" type="submit" id="generate">Generate</button>
       </div>
+
+      <div id="message" class="message"></div>
     </form>
 
     <script>
       const form = document.getElementById("form");
       const swaggerUrl = document.getElementById("swaggerUrl");
       const path = document.getElementById("path");
+      const copyPath = document.getElementById("copyPath");
       const method = document.getElementById("method");
       const message = document.getElementById("message");
       const generate = document.getElementById("generate");
@@ -352,6 +397,40 @@
       let generateBlockedUntilActionChange = false;
       let initialMethod = "";
       let initialPath = "";
+      const copyIconUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAKpJREFUeAHtlMENgzAMRb+jDtBp2o7QdgB6LCOwATABc8AAMAMsFYhQIEJR5BBAQuKdcnDy7NgyweDxjVKAEpK4Y0HblKRjurrKwUTow/PzK0hSZnvcRMWMiXgKJCHmXvKRiPmSO/O1EoEAlOT1jv6umBs80c3mElQBhymbYYokVuIa4U0rsDV+8y9aSnbpgZLsKjC5BJfgBIJpm/puSS7HVWAjZMNqzt/kHhr9MCtdWWXdAAAAAElFTkSuQmCC";
+      const refreshIconUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAg1JREFUeAG1VrFS20AQ3XfxBNLxCcofOBVMKsrEjZUigS7kC4i/wKcviP8gpMk4qeQGKJOGARr4A/QJrhjMwC27J52tkY3GHqw3o9HdSffe7u1qV6Aa7Mbx1u3960MwdmUaFZciyy8zAnN6fjrMwp7tj3us94uTP9A7FhHvfNiPHPiHPIxpGYCO4JCoUFXAVN/d7uwdOsNXSs6gMYAjJv4kXrzVTXo5vHrn1wi//CamAwZfCfn3ee2y5Z0vfWbYYpq+2Zh8+5emY6qBeissVgS/ltfnjkgtF0sGxbQnLwxoBYiQFS/6VYFWsMIRW10RD5LL0+FS5OG8FeJB+dHUax8DNtQH0xYkWEJu6QXQuMktCXOo9eLajZ9IIMsptw4YBnwqqvXrJvcCINfVgWMzogZgHKitgxaQUQMwGlwdnB3/vqYGAGoIIYUNNYD3nc/tYjhuROCBEeUjXDciAJhuPuLR2mNQ/XBb4YEWO4mKDVlVRihcy0DLjpYl/+GeDLPpET1HvpL1Uu6lWh74eiQNSNemHpTJxUV7efw3WYE7PwEmW3AloezM+kGp9OaKszZYR+z79mTjZ2ivRbm3M5qKgJxZ7xF5+Q5ChiUb0MrC174T70eYuLYUyq4TYn3Xt1exvNqo5gQ0oM+1wRqkkjG9Rd4uFAhrecohBnGX/S8LR8W2DPrbwvR/c/NuUNe3nwBjq/hvAdglOwAAAABJRU5ErkJggg==";
+      const loadIconUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAARJJREFUeAHtlK1uAkEUhc+lTWhd6yuoaFJRXVayjh+DgnXwCEgcWCRvAA4cDhxYMCBwCBA8wDoCgsu9wCYIYHcS1pD9kslM5uecmTt3BjAgmSmyFpM1MYRMZBAZRAZPb5DK5z8QloGVK5Q22/jUSjuJm3NkTD6/pZUulIwN9vuYLVWCiYfXTLRPx05zULmlQ7jDf8ZpEVh3tyImWwSXx0VM3544wLP3+M4e9XruVQPvfx/3u+RnchI8svIT93R9s2jS75QZ1L4QBwLs3CNQmqqJVE2JtatF20HElVcEREKoF1mBIeE/tPORcS/fTbnQcsnKOnVmriEcmi/rxXz09fP3KSf5lTx9wwPQqEhoGuNBt3oAmaNqrjPL0z4AAAAASUVORK5CYII=";
+      const generateIconUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAa5JREFUeAGtVbFOAkEQnTkMHB3WqMFEaITECq88OyQWZyN06hcoXyB8gf6BlGh1NkondAYbGhMSC2hM7KQyQKLjLEbEc+92E+4ll7t7tzvvZmf2LUIArELZJqT7X4a6SMb+Q7MxAE2gakC+WHpDgsQcNYzHxust1x2CBgzlAMIbD5V4n5inoAmlAOfY+kcRndiOkwANKAVG0ZErobWzUAp0ea25UC0vr5uFeomm0bAtYbWyMLZ3S+d8Ub54cOY7CD5cqa5GFiiC/7xwz1c7t9c1CBGRlXR2me/WVA3QTmY24eX5qQ0hAbc4xegk1vdspoVACEMiqD/eXVUir73eaDWdizNvQ0jgrjP5spKZHE67iHv9QqhCyBBNEBEPIou1jeyYq12AcGH+MTvuqD7fUhAilG46Ey+WL4HoSPJpgIQ7fhauJcDnQor3SF8agPCYg9f95upZheHbYW5Q8O+pGiAiqY3w31cUU9UC1l7ZBknhibCmc3QqBegTDiX0oNNsVEEDgQLCRgjI8fK8NNqGGChgTkzH61GIUFcVdh5LgV+JZssjrIT/xjWjY2Vh5/EFhNKVr0KxZEAAAAAASUVORK5CYII=";
+      const closeIconUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAMxJREFUeAHFlcsNwjAMhu1MkjE4wo0RuHayXhmBWzkyRjYJNglSBUlr17VqqVJru9+fp42n6y1mzCNmHF6Pe4IdbM4MQC/kO5Nj4gAYrcKnyhwDkAp9JHqiVWQGj8zkGWAncNEuV4+BawkWOMdQmrgF/iegFZHk4tYfpQNpCqwBNLPsCvRA7Nfs06JAS6S6RXCRQEMEQHGMAzjbsUvkusmux9T1ormWCtdi51quXRvOHvAlkW/TN8PZPiMudyVB6fGl6SPg0wr/FanM4Q2232Ehuj7+RgAAAABJRU5ErkJggg==";
+
+      copyPath.innerHTML = `<img src="${copyIconUrl}" alt="" />`;
+      renderLoadButton(false);
+      renderRefreshButton(false);
+      renderGenerateButton(false);
+      renderCancelButton();
+
+      function renderLoadButton(isLoadingSpec) {
+        const label = isLoadingSpec ? "Loading..." : "Load";
+        loadSpec.innerHTML = `<span>${label}</span><img src="${loadIconUrl}" alt="" />`;
+        loadSpec.classList.add("button-with-icon");
+      }
+
+      function renderRefreshButton(isRefreshing) {
+        const label = isRefreshing ? "Refreshing..." : "Refresh";
+        refresh.innerHTML = `<span>${label}</span><img src="${refreshIconUrl}" alt="" />`;
+        refresh.classList.add("button-with-icon");
+      }
+
+      function renderGenerateButton(isGenerating) {
+        const label = isGenerating ? "Generating..." : "Generate";
+        generate.innerHTML = `<span>${label}</span><img src="${generateIconUrl}" alt="" />`;
+        generate.classList.add("button-with-icon");
+      }
+
+      function renderCancelButton() {
+        cancel.innerHTML = `<span>Close</span><img src="${closeIconUrl}" alt="" />`;
+        cancel.classList.add("button-with-icon");
+      }
 
       function setMessage(text, state) {
         message.textContent = text;
@@ -365,12 +444,13 @@
       function setLoading(nextIsLoading) {
         isLoading = nextIsLoading;
         updateGenerateState();
+        updateCopyState();
         cancel.disabled = nextIsLoading;
         loadSpec.disabled = nextIsLoading;
         refresh.disabled = nextIsLoading || refresh.dataset.canRefresh !== "true";
-        generate.textContent = nextIsLoading ? "Generating..." : "Generate";
-        refresh.textContent = nextIsLoading ? "Refreshing..." : "Refresh";
-        loadSpec.textContent = nextIsLoading ? "Loading..." : "Load";
+        renderGenerateButton(nextIsLoading);
+        renderRefreshButton(nextIsLoading);
+        renderLoadButton(nextIsLoading);
       }
 
       function validateUrl() {
@@ -416,6 +496,35 @@
 
       function updateGenerateState() {
         generate.disabled = isLoading || (generateBlockedUntilActionChange && !selectedActionChanged());
+      }
+
+      function updateCopyState() {
+        copyPath.disabled = isLoading || !path.value.trim();
+      }
+
+      async function copyText(value) {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        try {
+          if (!document.execCommand("copy")) {
+            throw new Error("Unable to copy path.");
+          }
+        } finally {
+          document.body.removeChild(textarea);
+        }
       }
 
       function renderResults() {
@@ -470,6 +579,7 @@
         clearMessage();
         renderResults();
         updateGenerateState();
+        updateCopyState();
       }
 
       function actionKey(action) {
@@ -488,6 +598,7 @@
         applyResponseCodes(action ? action.responseCodes : [], selectedResponseCodes);
         renderResults();
         updateGenerateState();
+        updateCopyState();
       }
 
       function applyResponseCodes(codes, preferredCodes) {
@@ -595,6 +706,20 @@
       search.addEventListener("input", renderResults);
       method.addEventListener("change", updateSelectedActionFromFields);
       path.addEventListener("input", updateSelectedActionFromFields);
+      copyPath.addEventListener("click", async () => {
+        const value = path.value.trim();
+        if (!value) return;
+
+        try {
+          await copyText(value);
+          setMessage("Path copied.", "done");
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "Unable to copy path.";
+          setMessage(detail, "error");
+        }
+
+        updateCopyState();
+      });
 
       cancel.addEventListener("click", () => {
         parent.postMessage({ pluginMessage: { type: "cancel" } }, "*");
@@ -615,6 +740,7 @@
         if (pluginMessage.type === "error") {
           setMessage(pluginMessage.message, "error");
           updateGenerateState();
+          updateCopyState();
         }
 
         if (pluginMessage.type === "done") {
@@ -623,6 +749,7 @@
           generateBlockedUntilActionChange = true;
           clearMessage();
           updateGenerateState();
+          updateCopyState();
         }
 
         if (pluginMessage.type === "actions") {
@@ -636,6 +763,7 @@
           renderResults();
           clearMessage();
           updateGenerateState();
+          updateCopyState();
         }
 
         if (pluginMessage.type === "selection") {
@@ -653,6 +781,7 @@
             applyResponseCodes([], selectedResponseCodes);
             clearMessage();
             updateGenerateState();
+            updateCopyState();
           }
 
           if (pluginMessage.autoLoadSpec) {
@@ -675,8 +804,11 @@
 
           clearMessage();
           updateGenerateState();
+          updateCopyState();
         }
       };
+
+      updateCopyState();
     </script>
   </body>
 </html>
