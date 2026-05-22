@@ -520,7 +520,7 @@
   var cachedSpecUrl = "";
   var cachedSpec;
   function OpenApiMiniViewerWidget() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     const widgetNodeId = useWidgetNodeId();
     const [swaggerUrl, setSwaggerUrl] = useSyncedState("swaggerUrl", DEFAULT_SWAGGER_URL);
     const [method, setMethod] = useSyncedState("method", "");
@@ -539,9 +539,12 @@
     const codeMaxWidth = cardWidth - 12;
     const responseCodeMaxWidth = codeMaxWidth - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
     const copyablePath = ((_b = model == null ? void 0 : model.path) != null ? _b : path).trim();
+    const activeMethod = (_c = model == null ? void 0 : model.method) != null ? _c : method;
+    const activePath = ((_d = model == null ? void 0 : model.path) != null ? _d : path).trim();
     const nextSampleThemeValue = nextSampleTheme(sampleTheme);
     const themeToggleIcon = nextSampleThemeValue === "light" ? text_black_default : text_white_default;
     const themeToggleLabel = nextSampleThemeValue === "light" ? "Light Samples" : "Dark Samples";
+    const refreshStatusText = loadingMessage === "Refreshing endpoint..." && activeMethod && activePath ? `Refreshing: ${activeMethod} ${activePath}` : "";
     useEffect(() => {
       if (initialized) return;
       waitForTask((async () => {
@@ -650,13 +653,14 @@
         overflow: "visible"
       },
       (model == null ? void 0 : model.tag) ? /* @__PURE__ */ figma.widget.h(Title, { tag: model.tag, cardWidth }) : null,
-      /* @__PURE__ */ figma.widget.h(Header, { method: (_c = model == null ? void 0 : model.method) != null ? _c : method, path: (_d = model == null ? void 0 : model.path) != null ? _d : path, cardWidth, widthMode }),
+      /* @__PURE__ */ figma.widget.h(Header, { method: (_e = model == null ? void 0 : model.method) != null ? _e : method, path: (_f = model == null ? void 0 : model.path) != null ? _f : path, cardWidth, widthMode }),
       (model == null ? void 0 : model.description) ? /* @__PURE__ */ figma.widget.h(EndpointDescription, { description: model.description, cardWidth }) : null,
-      loadingMessage ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted", cardWidth }) : null,
+      loadingMessage && !refreshStatusText ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted", cardWidth }) : null,
       error ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: error, tone: "error", cardWidth }) : null,
       !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Configure or refresh to render an OpenAPI endpoint.", tone: "muted", cardWidth }) : null,
       model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, model.request ? /* @__PURE__ */ figma.widget.h(CodeBlock, { json: model.request.exampleJson, minWidth: codeMaxWidth, maxWidth: codeMaxWidth, theme: sampleTheme }) : /* @__PURE__ */ figma.widget.h(MutedText, null, "No request body parameters.")), /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Responses", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "vertical", spacing: 8, overflow: "visible" }, displayedResponses.map((response) => /* @__PURE__ */ figma.widget.h(ResponseItem, { key: response.code, response, codeMaxWidth: responseCodeMaxWidth, theme: sampleTheme }))))) : null,
-      /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: 6, padding: { top: 6, right: 6, bottom: 6, left: 6 }, fill: COLORS.white, width: cardWidth, verticalAlignItems: "center" }, /* @__PURE__ */ figma.widget.h(Image, { name: "UpKeepDay Icon", src: upkeepday_widget_icon_default, width: 16, height: 16 }), /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Configure", iconSrc: settings_icon_default, onClick: () => openConfigure(config, Boolean(model)) }), /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Refresh", iconSrc: refresh_icon_default, onClick: () => waitForTask(refreshConfig(config)) }), copyablePath ? /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Copy Path", iconSrc: copy_alt_default, onClick: () => openCopyPathDialog(copyablePath) }) : null, /* @__PURE__ */ figma.widget.h(IconActionButton, { label: themeToggleLabel, iconSrc: themeToggleIcon, onClick: () => setSampleTheme(nextSampleThemeValue) }), /* @__PURE__ */ figma.widget.h(WidthButton, { mode: widthMode, onClick: () => setWidthMode(nextWidthMode(widthMode)) }), lastUpdatedAt ? /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, formatUpdatedAt(lastUpdatedAt)) : null)
+      /* @__PURE__ */ figma.widget.h(AutoLayout, { direction: "horizontal", spacing: 6, padding: { top: 6, right: 6, bottom: 6, left: 6 }, fill: COLORS.white, width: cardWidth, verticalAlignItems: "center" }, /* @__PURE__ */ figma.widget.h(Image, { name: "UpKeepDay Icon", src: upkeepday_widget_icon_default, width: 16, height: 16 }), /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Configure", iconSrc: settings_icon_default, onClick: () => openConfigure(config, Boolean(model)) }), /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Refresh", iconSrc: refresh_icon_default, onClick: () => waitForTask(refreshConfig(config)) }), copyablePath ? /* @__PURE__ */ figma.widget.h(IconActionButton, { label: "Copy Path", iconSrc: copy_alt_default, onClick: () => openCopyPathDialog(copyablePath) }) : null, /* @__PURE__ */ figma.widget.h(IconActionButton, { label: themeToggleLabel, iconSrc: themeToggleIcon, onClick: () => setSampleTheme(nextSampleThemeValue) }), /* @__PURE__ */ figma.widget.h(WidthButton, { mode: widthMode, onClick: () => setWidthMode(nextWidthMode(widthMode)) }), lastUpdatedAt ? /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, formatUpdatedAt(lastUpdatedAt)) : null),
+      refreshStatusText ? /* @__PURE__ */ figma.widget.h(FooterStatusMessage, { message: refreshStatusText, cardWidth }) : null
     );
     function openConfigure(currentConfig, canRefresh) {
       waitForTask(new Promise((resolve) => {
@@ -789,6 +793,9 @@
   }
   function StatusMessage({ message, tone, cardWidth }) {
     return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, padding: { top: 8, right: 8, bottom: 8, left: 8 }, fill: tone === "error" ? "#fff0ef" : COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 12, fill: tone === "error" ? COLORS.red : COLORS.muted }, message));
+  }
+  function FooterStatusMessage({ message, cardWidth }) {
+    return /* @__PURE__ */ figma.widget.h(AutoLayout, { width: cardWidth, padding: { top: 4, right: 6, bottom: 6, left: 6 }, fill: COLORS.white }, /* @__PURE__ */ figma.widget.h(Text, { fontSize: 10, fill: COLORS.text }, message));
   }
   function MutedText({ children }) {
     return /* @__PURE__ */ figma.widget.h(Text, { fontSize: 15, fill: COLORS.muted }, children);

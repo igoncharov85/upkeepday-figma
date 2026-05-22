@@ -121,8 +121,7 @@
 
       .result {
         display: grid;
-        grid-template-columns: auto 1fr;
-        align-items: center;
+        grid-template-columns: 1fr;
         gap: 8px;
         width: 100%;
         height: auto;
@@ -150,13 +149,13 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 48px;
-        min-height: 20px;
+        min-width: 42px;
+        min-height: 18px;
         border-radius: 4px;
-        padding: 3px 6px;
+        padding: 2px 6px;
         color: #ffffff;
         text-align: center;
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 800;
       }
 
@@ -192,6 +191,13 @@
         background: #a85d7f;
       }
 
+      .result-header {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 8px;
+      }
+
       .result-main {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -201,10 +207,19 @@
         font-weight: 500;
       }
 
-      .result-meta {
+      .result-summary {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: #8a91a0;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .result-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: normal;
         color: #2f3442;
         font-size: 12px;
         font-weight: 700;
@@ -393,7 +408,9 @@
       let selectedActionKey = "";
       let responseCodes = [];
       let selectedResponseCodes = [];
-      let isLoading = false;
+      let isLoadingSpec = false;
+      let isGenerating = false;
+      let isRefreshing = false;
       let generateBlockedUntilActionChange = false;
       let initialMethod = "";
       let initialPath = "";
@@ -441,16 +458,19 @@
         setMessage("");
       }
 
-      function setLoading(nextIsLoading) {
-        isLoading = nextIsLoading;
+      function isBusy() {
+        return isLoadingSpec || isGenerating || isRefreshing;
+      }
+
+      function syncButtonState() {
         updateGenerateState();
         updateCopyState();
-        cancel.disabled = nextIsLoading;
-        loadSpec.disabled = nextIsLoading;
-        refresh.disabled = nextIsLoading || refresh.dataset.canRefresh !== "true";
-        renderGenerateButton(nextIsLoading);
-        renderRefreshButton(nextIsLoading);
-        renderLoadButton(nextIsLoading);
+        cancel.disabled = isBusy();
+        loadSpec.disabled = isBusy();
+        refresh.disabled = isBusy() || refresh.dataset.canRefresh !== "true";
+        renderGenerateButton(isGenerating);
+        renderRefreshButton(isRefreshing);
+        renderLoadButton(isLoadingSpec);
       }
 
       function validateUrl() {
@@ -495,11 +515,11 @@
       }
 
       function updateGenerateState() {
-        generate.disabled = isLoading || (generateBlockedUntilActionChange && !selectedActionChanged());
+        generate.disabled = isBusy() || (generateBlockedUntilActionChange && !selectedActionChanged());
       }
 
       function updateCopyState() {
-        copyPath.disabled = isLoading || !path.value.trim();
+        copyPath.disabled = isBusy() || !path.value.trim();
       }
 
       async function copyText(value) {
@@ -528,9 +548,20 @@
       }
 
       function renderResults() {
-        const query = search.value.trim().toLowerCase();
+        const rawQuery = search.value.toLowerCase();
+        const query = rawQuery.trim();
+        const searchByPath = rawQuery.includes("/");
+        const searchBySummary = !searchByPath && /\s/.test(rawQuery);
         const matches = actions
-          .filter((action) => !query || action.searchIndex.includes(query))
+          .filter((action) => {
+            if (!query) return true;
+
+            if (searchBySummary) {
+              return (action.summary || "").toLowerCase().includes(query);
+            }
+
+            return action.path.toLowerCase().includes(query);
+          })
           .slice(0, 80);
 
         results.innerHTML = "";
@@ -549,6 +580,9 @@
           button.type = "button";
           button.className = `result ${selectedActionKey === actionKey(action) ? "selected" : ""}`;
 
+          const header = document.createElement("div");
+          header.className = "result-header";
+
           const methodBadge = document.createElement("span");
           methodBadge.className = `method-badge method-${action.method.toLowerCase()}`;
           methodBadge.textContent = action.method;
@@ -556,16 +590,26 @@
           const content = document.createElement("span");
           const main = document.createElement("div");
           main.className = "result-main";
-          main.textContent = action.tag || "Untagged";
+          main.textContent = action.summary ? `${action.tag || "Untagged"} · ` : action.tag || "Untagged";
+
+          if (action.summary) {
+            const summary = document.createElement("span");
+            summary.className = "result-summary";
+            summary.textContent = action.summary;
+            content.appendChild(main);
+            content.appendChild(summary);
+          } else {
+            content.appendChild(main);
+          }
 
           const meta = document.createElement("div");
           meta.className = "result-meta";
           meta.textContent = action.path;
 
-          content.appendChild(main);
-          content.appendChild(meta);
-          button.appendChild(methodBadge);
-          button.appendChild(content);
+          header.appendChild(methodBadge);
+          header.appendChild(content);
+          button.appendChild(header);
+          button.appendChild(meta);
           button.addEventListener("click", () => selectAction(action));
           results.appendChild(button);
         }
@@ -667,7 +711,8 @@
           return;
         }
 
-        setLoading(true);
+        isGenerating = true;
+        syncButtonState();
         clearMessage();
         parent.postMessage({
           pluginMessage: {
@@ -688,7 +733,8 @@
           return false;
         }
 
-        setLoading(true);
+        isLoadingSpec = true;
+        syncButtonState();
         clearMessage();
         parent.postMessage({
           pluginMessage: {
@@ -726,7 +772,8 @@
       });
 
       refresh.addEventListener("click", () => {
-        setLoading(true);
+        isRefreshing = true;
+        syncButtonState();
         clearMessage();
         parent.postMessage({ pluginMessage: { type: "refresh" } }, "*");
       });
@@ -735,15 +782,20 @@
         const pluginMessage = event.data.pluginMessage;
         if (!pluginMessage) return;
 
-        setLoading(false);
-
         if (pluginMessage.type === "error") {
+          isLoadingSpec = false;
+          isGenerating = false;
+          isRefreshing = false;
+          syncButtonState();
           setMessage(pluginMessage.message, "error");
           updateGenerateState();
           updateCopyState();
         }
 
         if (pluginMessage.type === "done") {
+          isGenerating = false;
+          isRefreshing = false;
+          syncButtonState();
           initialMethod = method.value;
           initialPath = path.value.trim();
           generateBlockedUntilActionChange = true;
@@ -753,6 +805,8 @@
         }
 
         if (pluginMessage.type === "actions") {
+          isLoadingSpec = false;
+          syncButtonState();
           actions = pluginMessage.actions || [];
           const currentAction = findCurrentAction();
           selectedActionKey = currentAction ? actionKey(currentAction) : "";
@@ -767,6 +821,7 @@
         }
 
         if (pluginMessage.type === "selection") {
+          syncButtonState();
           refresh.dataset.canRefresh = pluginMessage.canRefresh ? "true" : "false";
           refresh.disabled = !pluginMessage.canRefresh;
 
@@ -809,6 +864,7 @@
       };
 
       updateCopyState();
+      syncButtonState();
     </script>
   </body>
 </html>

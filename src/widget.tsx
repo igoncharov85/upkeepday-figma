@@ -86,9 +86,12 @@ function OpenApiMiniViewerWidget() {
   const codeMaxWidth = cardWidth - 12;
   const responseCodeMaxWidth = codeMaxWidth - RESPONSE_CODE_LABEL_WIDTH - RESPONSE_ROW_GAP;
   const copyablePath = (model?.path ?? path).trim();
+  const activeMethod = model?.method ?? method;
+  const activePath = (model?.path ?? path).trim();
   const nextSampleThemeValue = nextSampleTheme(sampleTheme);
   const themeToggleIcon = nextSampleThemeValue === "light" ? textBlackIcon : textWhiteIcon;
   const themeToggleLabel = nextSampleThemeValue === "light" ? "Light Samples" : "Dark Samples";
+  const refreshStatusText = loadingMessage === "Refreshing endpoint..." && activeMethod && activePath ? `Refreshing: ${activeMethod} ${activePath}` : "";
 
   useEffect(() => {
     if (initialized) return;
@@ -212,7 +215,7 @@ function OpenApiMiniViewerWidget() {
       {model?.tag ? <Title tag={model.tag} cardWidth={cardWidth} /> : null}
       <Header method={model?.method ?? method} path={model?.path ?? path} cardWidth={cardWidth} widthMode={widthMode} />
       {model?.description ? <EndpointDescription description={model.description} cardWidth={cardWidth} /> : null}
-      {loadingMessage ? <StatusMessage message={loadingMessage} tone="muted" cardWidth={cardWidth} /> : null}
+      {loadingMessage && !refreshStatusText ? <StatusMessage message={loadingMessage} tone="muted" cardWidth={cardWidth} /> : null}
       {error ? <StatusMessage message={error} tone="error" cardWidth={cardWidth} /> : null}
       {!model ? <StatusMessage message="Configure or refresh to render an OpenAPI endpoint." tone="muted" cardWidth={cardWidth} /> : null}
       {model ? (
@@ -240,6 +243,7 @@ function OpenApiMiniViewerWidget() {
         <WidthButton mode={widthMode} onClick={() => setWidthMode(nextWidthMode(widthMode))} />
         {lastUpdatedAt ? <Text fontSize={10} fill={COLORS.text}>{formatUpdatedAt(lastUpdatedAt)}</Text> : null}
       </AutoLayout>
+      {refreshStatusText ? <FooterStatusMessage message={refreshStatusText} cardWidth={cardWidth} /> : null}
     </AutoLayout>
   );
 
@@ -452,6 +456,14 @@ function StatusMessage({ message, tone, cardWidth }: { message: string; tone: "e
   return (
     <AutoLayout width={cardWidth} padding={{ top: 8, right: 8, bottom: 8, left: 8 }} fill={tone === "error" ? "#fff0ef" : COLORS.white}>
       <Text fontSize={12} fill={tone === "error" ? COLORS.red : COLORS.muted}>{message}</Text>
+    </AutoLayout>
+  );
+}
+
+function FooterStatusMessage({ message, cardWidth }: { message: string; cardWidth: number }) {
+  return (
+    <AutoLayout width={cardWidth} padding={{ top: 4, right: 6, bottom: 6, left: 6 }} fill={COLORS.white}>
+      <Text fontSize={10} fill={COLORS.text}>{message}</Text>
     </AutoLayout>
   );
 }
