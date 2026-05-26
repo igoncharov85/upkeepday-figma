@@ -2,12 +2,16 @@
   "name": "OpenAPI Mini Viewer",
   "id": "1639439357884761241",
   "api": "1.0.0",
-  "widgetApi": "1.0.0",
-  "containsWidget": true,
-  "editorType": ["figma"],
   "main": "dist/widget.js",
   "ui": "dist/index.html",
+  "capabilities": [],
+  "enableProposedApi": false,
   "documentAccess": "dynamic-page",
+  "editorType": [
+    "figma"
+  ],
+  "containsWidget": true,
+  "widgetApi": "1.0.0",
   "networkAccess": {
     "allowedDomains": ["*"],
     "reasoning": "The widget fetches user-provided public Swagger/OpenAPI JSON URLs so designers can render endpoint documentation from any API specification.",

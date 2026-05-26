@@ -229,13 +229,12 @@
   }
   function typescriptDeclarationFromSchema(root, schema, typeName) {
     const resolved = mergeRef(root, schema);
-    const type = typescriptType(root, resolved, 0, /* @__PURE__ */ new Set());
-    if (type.kind === "object") {
-      return `interface ${typeName} ${type.value}`;
-    }
-    return `type ${typeName} = ${type.value};`;
+    const context = { declarations: [], declaredNames: /* @__PURE__ */ new Set() };
+    const type = typescriptType(root, resolved, 0, /* @__PURE__ */ new Set(), context, typeName, typeName);
+    const mainDeclaration = type.kind === "object" ? `interface ${typeName} ${type.value}` : `type ${typeName} = ${type.value};`;
+    return [...context.declarations, mainDeclaration].join("\n\n");
   }
-  function typescriptType(root, schema, depth, seen) {
+  function typescriptType(root, schema, depth, seen, context, parentTypeName, propertyName) {
     if (depth > 12) return { kind: "type", value: "unknown" };
     const current = asOptionalObject(schema);
     if (!current) return { kind: "type", value: "unknown" };
@@ -244,49 +243,56 @@
       if (seen.has(ref)) return { kind: "type", value: "unknown" };
       const nextSeen = new Set(seen);
       nextSeen.add(ref);
-      return typescriptType(root, mergeRef(root, current), depth + 1, nextSeen);
+      return typescriptType(root, mergeRef(root, current), depth + 1, nextSeen, context, parentTypeName, propertyName);
     }
     const enumType = typescriptEnumType(current);
     if (enumType) return withNullable(current, { kind: "type", value: enumType });
     const allOf = asArray(current.allOf).map(asOptionalObject).filter(Boolean);
     if (allOf.length > 0) {
       const merged = mergeObjectSchemas(allOf.map((item) => mergeRef(root, item)));
-      if (merged) return withNullable(current, typescriptType(root, merged, depth + 1, seen));
-      const parts = allOf.map((item) => parenthesizedType(typescriptType(root, item, depth + 1, seen).value));
+      if (merged) return withNullable(current, typescriptType(root, merged, depth + 1, seen, context, parentTypeName, propertyName));
+      const parts = allOf.map((item) => parenthesizedType(typescriptType(root, item, depth + 1, seen, context, parentTypeName, propertyName).value));
       return withNullable(current, { kind: "type", value: parts.join(" & ") || "unknown" });
     }
     const variants = asArray(current.oneOf).length > 0 ? asArray(current.oneOf) : asArray(current.anyOf);
     if (variants.length > 0) {
-      const parts = variants.map((item) => typescriptType(root, item, depth + 1, seen).value);
+      const parts = variants.map((item) => typescriptType(root, item, depth + 1, seen, context, parentTypeName, propertyName).value);
       return withNullable(current, { kind: "type", value: unique(parts).join(" | ") || "unknown" });
     }
     const type = normalizedType(current);
     if (type === "array") {
-      const itemType = typescriptType(root, current.items, depth + 1, seen).value;
+      const itemSchema = asOptionalObject(current.items);
+      const itemObject = itemSchema ? resolvedObjectArrayItem(root, itemSchema) : void 0;
+      if (itemObject) {
+        const itemTypeName = propertyName && propertyName !== parentTypeName ? arrayItemTypeName(parentTypeName, propertyName) : `${parentTypeName}Item`;
+        declareInterface(root, itemObject, itemTypeName, depth + 1, seen, context);
+        return withNullable(current, { kind: "type", value: `${itemTypeName}[]` });
+      }
+      const itemType = typescriptType(root, current.items, depth + 1, seen, context, parentTypeName, propertyName).value;
       return withNullable(current, { kind: "type", value: `${parenthesizedArrayType(itemType)}[]` });
     }
     if (type === "object" || current.properties || current.additionalProperties) {
-      return withNullable(current, typescriptObjectType(root, current, depth, seen));
+      return withNullable(current, typescriptObjectType(root, current, depth, seen, context, parentTypeName));
     }
     if (type === "integer" || type === "number") return withNullable(current, { kind: "type", value: "number" });
     if (type === "boolean") return withNullable(current, { kind: "type", value: "boolean" });
     if (type === "string") return withNullable(current, { kind: "type", value: "string" });
     return withNullable(current, { kind: "type", value: "unknown" });
   }
-  function typescriptObjectType(root, schema, depth, seen) {
+  function typescriptObjectType(root, schema, depth, seen, context, parentTypeName) {
     const properties = asOptionalObject(schema.properties);
     const required = new Set(asArray(schema.required).filter((item) => typeof item === "string"));
     const lines = [];
     if (properties) {
       for (const [propertyName, propertySchema] of Object.entries(properties)) {
         const optional = required.has(propertyName) ? "" : "?";
-        const propertyType = typescriptType(root, propertySchema, depth + 1, new Set(seen)).value;
+        const propertyType = typescriptType(root, propertySchema, depth + 1, new Set(seen), context, parentTypeName, propertyName).value;
         lines.push(`${indent(1)}${typescriptPropertyName(propertyName)}${optional}: ${propertyType};`);
       }
     }
     const additionalProperties = schema.additionalProperties;
     if (isPlainObject(additionalProperties)) {
-      const additionalType = typescriptType(root, additionalProperties, depth + 1, seen).value;
+      const additionalType = typescriptType(root, additionalProperties, depth + 1, seen, context, parentTypeName, "additionalProperty").value;
       lines.push(`${indent(1)}[key: string]: ${additionalType};`);
     } else if (additionalProperties === true && lines.length === 0) {
       lines.push(`${indent(1)}[key: string]: unknown;`);
@@ -295,6 +301,22 @@
     return { kind: "object", value: `{
 ${lines.join("\n")}
 }` };
+  }
+  function declareInterface(root, schema, typeName, depth, seen, context) {
+    if (context.declaredNames.has(typeName)) return;
+    context.declaredNames.add(typeName);
+    const objectType = typescriptObjectType(root, schema, depth, seen, context, typeName);
+    context.declarations.push(`interface ${typeName} ${objectType.value}`);
+  }
+  function resolvedObjectArrayItem(root, schema) {
+    const resolved = mergeRef(root, schema);
+    const allOf = asArray(resolved.allOf).map(asOptionalObject).filter(Boolean);
+    if (allOf.length > 0) {
+      return mergeObjectSchemas(allOf.map((item) => mergeRef(root, item)));
+    }
+    const type = normalizedType(resolved);
+    if (type === "object" || resolved.properties || resolved.additionalProperties) return resolved;
+    return void 0;
   }
   function typescriptEnumType(schema) {
     if (!Array.isArray(schema.enum) || schema.enum.length === 0) return void 0;
@@ -352,6 +374,17 @@ ${lines.join("\n")}
       return normalized.charAt(0).toUpperCase() + normalized.slice(1);
     }).join("");
     return result || "Default";
+  }
+  function arrayItemTypeName(parentTypeName, propertyName) {
+    if (!propertyName) return `${parentTypeName}Item`;
+    const propertyTypePart = toPascalCase(propertyName);
+    if (!propertyTypePart) return `${parentTypeName}Item`;
+    return `${parentTypeName}${singularTypePart(propertyTypePart)}`;
+  }
+  function singularTypePart(value) {
+    if (value.length > 3 && value.endsWith("ies")) return `${value.slice(0, -3)}y`;
+    if (value.length > 1 && value.endsWith("s") && !value.endsWith("ss")) return value.slice(0, -1);
+    return `${value}Item`;
   }
   function typescriptPropertyName(name) {
     return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);

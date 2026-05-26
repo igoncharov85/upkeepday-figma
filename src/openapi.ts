@@ -292,13 +292,13 @@ function responseTypescriptModel(baseTypeName: string, responses: ResponseExampl
 
 function typescriptDeclarationFromSchema(root: JsonObject, schema: JsonObject, typeName: string): string {
   const resolved = mergeRef(root, schema);
-  const type = typescriptType(root, resolved, 0, new Set<string>());
+  const context: TypeScriptContext = { declarations: [], declaredNames: new Set<string>() };
+  const type = typescriptType(root, resolved, 0, new Set<string>(), context, typeName, typeName);
+  const mainDeclaration = type.kind === "object"
+    ? `interface ${typeName} ${type.value}`
+    : `type ${typeName} = ${type.value};`;
 
-  if (type.kind === "object") {
-    return `interface ${typeName} ${type.value}`;
-  }
-
-  return `type ${typeName} = ${type.value};`;
+  return [...context.declarations, mainDeclaration].join("\n\n");
 }
 
 type TypeScriptType = {
@@ -306,7 +306,12 @@ type TypeScriptType = {
   value: string;
 };
 
-function typescriptType(root: JsonObject, schema: unknown, depth: number, seen: Set<string>): TypeScriptType {
+type TypeScriptContext = {
+  declarations: string[];
+  declaredNames: Set<string>;
+};
+
+function typescriptType(root: JsonObject, schema: unknown, depth: number, seen: Set<string>, context: TypeScriptContext, parentTypeName: string, propertyName?: string): TypeScriptType {
   if (depth > 12) return { kind: "type", value: "unknown" };
 
   const current = asOptionalObject(schema);
@@ -317,7 +322,7 @@ function typescriptType(root: JsonObject, schema: unknown, depth: number, seen: 
     if (seen.has(ref)) return { kind: "type", value: "unknown" };
     const nextSeen = new Set(seen);
     nextSeen.add(ref);
-    return typescriptType(root, mergeRef(root, current), depth + 1, nextSeen);
+    return typescriptType(root, mergeRef(root, current), depth + 1, nextSeen, context, parentTypeName, propertyName);
   }
 
   const enumType = typescriptEnumType(current);
@@ -326,27 +331,37 @@ function typescriptType(root: JsonObject, schema: unknown, depth: number, seen: 
   const allOf = asArray(current.allOf).map(asOptionalObject).filter(Boolean) as JsonObject[];
   if (allOf.length > 0) {
     const merged = mergeObjectSchemas(allOf.map((item) => mergeRef(root, item)));
-    if (merged) return withNullable(current, typescriptType(root, merged, depth + 1, seen));
+    if (merged) return withNullable(current, typescriptType(root, merged, depth + 1, seen, context, parentTypeName, propertyName));
 
-    const parts = allOf.map((item) => parenthesizedType(typescriptType(root, item, depth + 1, seen).value));
+    const parts = allOf.map((item) => parenthesizedType(typescriptType(root, item, depth + 1, seen, context, parentTypeName, propertyName).value));
     return withNullable(current, { kind: "type", value: parts.join(" & ") || "unknown" });
   }
 
   const variants = asArray(current.oneOf).length > 0 ? asArray(current.oneOf) : asArray(current.anyOf);
   if (variants.length > 0) {
-    const parts = variants.map((item) => typescriptType(root, item, depth + 1, seen).value);
+    const parts = variants.map((item) => typescriptType(root, item, depth + 1, seen, context, parentTypeName, propertyName).value);
     return withNullable(current, { kind: "type", value: unique(parts).join(" | ") || "unknown" });
   }
 
   const type = normalizedType(current);
 
   if (type === "array") {
-    const itemType = typescriptType(root, current.items, depth + 1, seen).value;
+    const itemSchema = asOptionalObject(current.items);
+    const itemObject = itemSchema ? resolvedObjectArrayItem(root, itemSchema) : undefined;
+    if (itemObject) {
+      const itemTypeName = propertyName && propertyName !== parentTypeName
+        ? arrayItemTypeName(parentTypeName, propertyName)
+        : `${parentTypeName}Item`;
+      declareInterface(root, itemObject, itemTypeName, depth + 1, seen, context);
+      return withNullable(current, { kind: "type", value: `${itemTypeName}[]` });
+    }
+
+    const itemType = typescriptType(root, current.items, depth + 1, seen, context, parentTypeName, propertyName).value;
     return withNullable(current, { kind: "type", value: `${parenthesizedArrayType(itemType)}[]` });
   }
 
   if (type === "object" || current.properties || current.additionalProperties) {
-    return withNullable(current, typescriptObjectType(root, current, depth, seen));
+    return withNullable(current, typescriptObjectType(root, current, depth, seen, context, parentTypeName));
   }
 
   if (type === "integer" || type === "number") return withNullable(current, { kind: "type", value: "number" });
@@ -356,7 +371,7 @@ function typescriptType(root: JsonObject, schema: unknown, depth: number, seen: 
   return withNullable(current, { kind: "type", value: "unknown" });
 }
 
-function typescriptObjectType(root: JsonObject, schema: JsonObject, depth: number, seen: Set<string>): TypeScriptType {
+function typescriptObjectType(root: JsonObject, schema: JsonObject, depth: number, seen: Set<string>, context: TypeScriptContext, parentTypeName: string): TypeScriptType {
   const properties = asOptionalObject(schema.properties);
   const required = new Set(asArray(schema.required).filter((item): item is string => typeof item === "string"));
   const lines: string[] = [];
@@ -364,14 +379,14 @@ function typescriptObjectType(root: JsonObject, schema: JsonObject, depth: numbe
   if (properties) {
     for (const [propertyName, propertySchema] of Object.entries(properties)) {
       const optional = required.has(propertyName) ? "" : "?";
-      const propertyType = typescriptType(root, propertySchema, depth + 1, new Set(seen)).value;
+      const propertyType = typescriptType(root, propertySchema, depth + 1, new Set(seen), context, parentTypeName, propertyName).value;
       lines.push(`${indent(1)}${typescriptPropertyName(propertyName)}${optional}: ${propertyType};`);
     }
   }
 
   const additionalProperties = schema.additionalProperties;
   if (isPlainObject(additionalProperties)) {
-    const additionalType = typescriptType(root, additionalProperties, depth + 1, seen).value;
+    const additionalType = typescriptType(root, additionalProperties, depth + 1, seen, context, parentTypeName, "additionalProperty").value;
     lines.push(`${indent(1)}[key: string]: ${additionalType};`);
   } else if (additionalProperties === true && lines.length === 0) {
     lines.push(`${indent(1)}[key: string]: unknown;`);
@@ -380,6 +395,27 @@ function typescriptObjectType(root: JsonObject, schema: JsonObject, depth: numbe
   if (lines.length === 0) return { kind: "object", value: "{\n  [key: string]: unknown;\n}" };
 
   return { kind: "object", value: `{\n${lines.join("\n")}\n}` };
+}
+
+function declareInterface(root: JsonObject, schema: JsonObject, typeName: string, depth: number, seen: Set<string>, context: TypeScriptContext): void {
+  if (context.declaredNames.has(typeName)) return;
+  context.declaredNames.add(typeName);
+
+  const objectType = typescriptObjectType(root, schema, depth, seen, context, typeName);
+  context.declarations.push(`interface ${typeName} ${objectType.value}`);
+}
+
+function resolvedObjectArrayItem(root: JsonObject, schema: JsonObject): JsonObject | undefined {
+  const resolved = mergeRef(root, schema);
+  const allOf = asArray(resolved.allOf).map(asOptionalObject).filter(Boolean) as JsonObject[];
+
+  if (allOf.length > 0) {
+    return mergeObjectSchemas(allOf.map((item) => mergeRef(root, item)));
+  }
+
+  const type = normalizedType(resolved);
+  if (type === "object" || resolved.properties || resolved.additionalProperties) return resolved;
+  return undefined;
 }
 
 function typescriptEnumType(schema: JsonObject): string | undefined {
@@ -459,6 +495,21 @@ function responseCodeTypePart(code: string): string {
   }).join("");
 
   return result || "Default";
+}
+
+function arrayItemTypeName(parentTypeName: string, propertyName: string | undefined): string {
+  if (!propertyName) return `${parentTypeName}Item`;
+
+  const propertyTypePart = toPascalCase(propertyName);
+  if (!propertyTypePart) return `${parentTypeName}Item`;
+
+  return `${parentTypeName}${singularTypePart(propertyTypePart)}`;
+}
+
+function singularTypePart(value: string): string {
+  if (value.length > 3 && value.endsWith("ies")) return `${value.slice(0, -3)}y`;
+  if (value.length > 1 && value.endsWith("s") && !value.endsWith("ss")) return value.slice(0, -1);
+  return `${value}Item`;
 }
 
 function typescriptPropertyName(name: string): string {

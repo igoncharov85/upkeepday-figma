@@ -240,7 +240,31 @@ type PostActionOnToDoRouteResponse = PostActionOnToDoRoute200Response | PostActi
                       name: { type: "string" },
                       active: { type: "boolean" },
                       tags: { type: "array", items: { type: "string", nullable: true } },
-                      metadata: { type: "object", additionalProperties: { type: "integer" } }
+                      metadata: { type: "object", additionalProperties: { type: "integer" } },
+                      students: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          required: ["id"],
+                          properties: {
+                            id: { type: "integer" },
+                            name: { type: "string" },
+                            sessions: {
+                              type: "array",
+                              items: {
+                                type: "object",
+                                properties: {
+                                  startUtc: { type: "string" }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      teachers: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/Teacher" }
+                      }
                     }
                   }
                 }
@@ -253,11 +277,29 @@ type PostActionOnToDoRouteResponse = PostActionOnToDoRoute200Response | PostActi
                   "application/json": {
                     schema: {
                       type: "array",
-                      items: { type: "integer" }
+                      items: {
+                        type: "object",
+                        required: ["id"],
+                        properties: {
+                          id: { type: "integer" },
+                          roles: { type: "array", items: { type: "string" } }
+                        }
+                      }
                     }
                   }
                 }
               }
+            }
+          }
+        }
+      },
+      components: {
+        schemas: {
+          Teacher: {
+            type: "object",
+            properties: {
+              id: { type: "integer" },
+              name: { type: "string" }
             }
           }
         }
@@ -268,17 +310,46 @@ type PostActionOnToDoRouteResponse = PostActionOnToDoRoute200Response | PostActi
       method: "POST"
     });
 
-    expect(model.request?.example).toEqual({ name: "string", active: true, tags: ["string"], metadata: { additionalProperty: 0 } });
-    expect(model.request?.typescriptModel).toBe(`interface PostItemsPayload {
+    expect(model.request?.example).toEqual({
+      name: "string",
+      active: true,
+      tags: ["string"],
+      metadata: { additionalProperty: 0 },
+      students: [{ id: 0, name: "string", sessions: [{ startUtc: "string" }] }],
+      teachers: [{ id: 0, name: "string" }]
+    });
+    expect(model.request?.typescriptModel).toBe(`interface PostItemsPayloadStudentSession {
+  startUtc?: string;
+}
+
+interface PostItemsPayloadStudent {
+  id: number;
+  name?: string;
+  sessions?: PostItemsPayloadStudentSession[];
+}
+
+interface PostItemsPayloadTeacher {
+  id?: number;
+  name?: string;
+}
+
+interface PostItemsPayload {
   name: string;
   active?: boolean;
   tags?: (string | null)[];
   metadata?: {
   [key: string]: number;
 };
+  students?: PostItemsPayloadStudent[];
+  teachers?: PostItemsPayloadTeacher[];
 }`);
-    expect(model.response.example).toEqual([0]);
-    expect(model.response.typescriptModel).toBe("type PostItems200Response = number[];");
+    expect(model.response.example).toEqual([{ id: 0, roles: ["string"] }]);
+    expect(model.response.typescriptModel).toBe(`interface PostItems200ResponseItem {
+  id: number;
+  roles?: string[];
+}
+
+type PostItems200Response = PostItems200ResponseItem[];`);
     expect(model.description).toBeUndefined();
   });
 
