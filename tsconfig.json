@@ -11,5 +11,5 @@
     "typeRoots": ["./node_modules/@types", "./node_modules/@figma"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "vite.ui.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"]
 }

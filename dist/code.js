@@ -763,7 +763,6 @@ ${lines.join("\n")}
         setPath(nextConfig.path);
         setResponseCodes(nextConfig.responseCodes);
         setInitialized(true);
-        openConfigure(nextConfig, Boolean(model));
       })());
     });
     usePropertyMenu([

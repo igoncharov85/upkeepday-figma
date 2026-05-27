@@ -115,7 +115,6 @@ function OpenApiMiniViewerWidget() {
       setPath(nextConfig.path);
       setResponseCodes(nextConfig.responseCodes);
       setInitialized(true);
-      openConfigure(nextConfig, Boolean(model));
     })());
   });
 

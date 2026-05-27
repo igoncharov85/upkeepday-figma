@@ -1,14 +1,15 @@
 {
   "name": "OpenAPI Mini Viewer",
-  "id": "1641495308719046963",
+  "id": "1641502029219054914",
   "api": "1.0.0",
-  "main": "dist/widget.js",
-  "ui": "dist/index.html",
+  "main": "dist/code.js",
+  "ui": "ui.html",
   "capabilities": [],
   "enableProposedApi": false,
   "documentAccess": "dynamic-page",
   "editorType": [
-    "figma"
+    "figma",
+    "figjam"
   ],
   "containsWidget": true,
   "widgetApi": "1.0.0",

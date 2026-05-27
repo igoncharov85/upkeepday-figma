@@ -4,19 +4,20 @@
   "description": "A Figma widget that renders compact Swagger/OpenAPI endpoint cards.",
   "scripts": {
     "build": "npm run build:ui && npm run build:widget",
-    "build:ui": "vite build --config vite.ui.config.ts",
-    "build:widget": "esbuild src/widget.tsx --bundle --outfile=dist/widget.js --target=es2017 --format=iife --jsx-factory=figma.widget.h --jsx-fragment=figma.widget.Fragment --loader:.png=dataurl --loader:.svg=dataurl",
+    "build:ui": "node -e \"require('fs').copyFileSync('src/ui/index.html', 'ui.html')\"",
+    "build:widget": "esbuild src/widget.tsx --bundle --outfile=dist/code.js --target=es2017 --format=iife --jsx-factory=figma.widget.h --jsx-fragment=figma.widget.Fragment --loader:.png=dataurl --loader:.svg=dataurl",
     "check": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@figma/eslint-plugin-figma-plugins": "*",
     "@figma/plugin-typings": "*",
     "@figma/widget-typings": "*",
-    "@types/node": "^22.15.21",
     "esbuild": "*",
+    "eslint": "^9.39.4",
     "typescript": "^5.9.3",
-    "vite": "^6.3.5",
+    "typescript-eslint": "^8.57.1",
     "vitest": "^3.1.4"
   }
 }
