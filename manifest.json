@@ -1,6 +1,6 @@
 {
   "name": "OpenAPI Mini Viewer",
-  "id": "1639439357884761241",
+  "id": "1641495308719046963",
   "api": "1.0.0",
   "main": "dist/widget.js",
   "ui": "dist/index.html",
