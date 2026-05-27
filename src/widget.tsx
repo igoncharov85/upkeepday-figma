@@ -118,26 +118,33 @@ function OpenApiMiniViewerWidget() {
     })());
   });
 
-  usePropertyMenu([
-    { itemType: "action", propertyName: "configure", tooltip: "Configure" },
-    { itemType: "action", propertyName: "refresh", tooltip: "Refresh" },
-    {
-      itemType: "dropdown",
-      propertyName: "widthMode",
-      tooltip: "Width",
-      options: WIDTH_OPTIONS,
-      selectedOption: widthMode
-    }
-  ], ({ propertyName, propertyValue }) => {
+  const propertyMenuItems: WidgetPropertyMenuItem[] = [
+    { itemType: "action", propertyName: "configure", tooltip: "Configure" }
+  ];
+
+  if (model) {
+    propertyMenuItems.push(
+      { itemType: "action", propertyName: "refresh", tooltip: "Refresh" },
+      {
+        itemType: "dropdown",
+        propertyName: "widthMode",
+        tooltip: "Width",
+        options: WIDTH_OPTIONS,
+        selectedOption: widthMode
+      }
+    );
+  }
+
+  usePropertyMenu(propertyMenuItems, ({ propertyName, propertyValue }) => {
     if (propertyName === "configure") {
       openConfigure(config, Boolean(model));
     }
 
-    if (propertyName === "refresh") {
+    if (propertyName === "refresh" && model) {
       waitForTask(refreshConfig(config));
     }
 
-    if (propertyName === "widthMode" && isWidthMode(propertyValue)) {
+    if (propertyName === "widthMode" && model && isWidthMode(propertyValue)) {
       setWidthMode(propertyValue);
     }
   });
@@ -199,7 +206,7 @@ function OpenApiMiniViewerWidget() {
     try {
       figma.ui.postMessage(message);
     } catch {
-      // Property menu refreshes can run while the configuration modal is closed.
+      // Refreshes can run while the configuration modal is closed.
     }
   }
 
@@ -214,13 +221,14 @@ function OpenApiMiniViewerWidget() {
       stroke={COLORS.borderGreen}
       strokeWidth={2}
       overflow="visible"
+      onClick={!model ? () => openConfigure(config, false) : undefined}
     >
       {model?.tag ? <Title tag={model.tag} cardWidth={cardWidth} /> : null}
       <Header method={model?.method ?? method} path={model?.path ?? path} cardWidth={cardWidth} widthMode={widthMode} />
       {model?.description ? <EndpointDescription description={model.description} cardWidth={cardWidth} /> : null}
       {loadingMessage && !refreshStatusText ? <StatusMessage message={loadingMessage} tone="muted" cardWidth={cardWidth} /> : null}
       {error ? <StatusMessage message={error} tone="error" cardWidth={cardWidth} /> : null}
-      {!model ? <StatusMessage message="Configure or refresh to render an OpenAPI endpoint." tone="muted" cardWidth={cardWidth} /> : null}
+      {!model ? <StatusMessage message="Click to configure an OpenAPI endpoint." tone="muted" cardWidth={cardWidth} /> : null}
       {model ? (
         <>
           <SectionTitle title="Parameters" cardWidth={cardWidth} />
@@ -573,7 +581,13 @@ function cardWidthForMode(mode: WidthMode): number {
 }
 
 function widthModeLabel(mode: WidthMode): string {
-  return WIDTH_OPTIONS.find((option) => option.option === mode)?.label ?? "Standard";
+  if (mode === "compact") {
+    return "Compact";
+  }
+  if (mode === "wide") {
+    return "Wide";
+  }
+  return "Standard";
 }
 
 function compactPathFontSize(path: string): number {

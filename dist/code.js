@@ -765,24 +765,29 @@ ${lines.join("\n")}
         setInitialized(true);
       })());
     });
-    usePropertyMenu([
-      { itemType: "action", propertyName: "configure", tooltip: "Configure" },
-      { itemType: "action", propertyName: "refresh", tooltip: "Refresh" },
-      {
-        itemType: "dropdown",
-        propertyName: "widthMode",
-        tooltip: "Width",
-        options: WIDTH_OPTIONS,
-        selectedOption: widthMode
-      }
-    ], ({ propertyName, propertyValue }) => {
+    const propertyMenuItems = [
+      { itemType: "action", propertyName: "configure", tooltip: "Configure" }
+    ];
+    if (model) {
+      propertyMenuItems.push(
+        { itemType: "action", propertyName: "refresh", tooltip: "Refresh" },
+        {
+          itemType: "dropdown",
+          propertyName: "widthMode",
+          tooltip: "Width",
+          options: WIDTH_OPTIONS,
+          selectedOption: widthMode
+        }
+      );
+    }
+    usePropertyMenu(propertyMenuItems, ({ propertyName, propertyValue }) => {
       if (propertyName === "configure") {
         openConfigure(config, Boolean(model));
       }
-      if (propertyName === "refresh") {
+      if (propertyName === "refresh" && model) {
         waitForTask(refreshConfig(config));
       }
-      if (propertyName === "widthMode" && isWidthMode(propertyValue)) {
+      if (propertyName === "widthMode" && model && isWidthMode(propertyValue)) {
         setWidthMode(propertyValue);
       }
     });
@@ -850,14 +855,15 @@ ${lines.join("\n")}
         fill: COLORS.white,
         stroke: COLORS.borderGreen,
         strokeWidth: 2,
-        overflow: "visible"
+        overflow: "visible",
+        onClick: !model ? () => openConfigure(config, false) : void 0
       },
       (model == null ? void 0 : model.tag) ? /* @__PURE__ */ figma.widget.h(Title, { tag: model.tag, cardWidth }) : null,
       /* @__PURE__ */ figma.widget.h(Header, { method: (_f = model == null ? void 0 : model.method) != null ? _f : method, path: (_g = model == null ? void 0 : model.path) != null ? _g : path, cardWidth, widthMode }),
       (model == null ? void 0 : model.description) ? /* @__PURE__ */ figma.widget.h(EndpointDescription, { description: model.description, cardWidth }) : null,
       loadingMessage && !refreshStatusText ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: loadingMessage, tone: "muted", cardWidth }) : null,
       error ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: error, tone: "error", cardWidth }) : null,
-      !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Configure or refresh to render an OpenAPI endpoint.", tone: "muted", cardWidth }) : null,
+      !model ? /* @__PURE__ */ figma.widget.h(StatusMessage, { message: "Click to configure an OpenAPI endpoint.", tone: "muted", cardWidth }) : null,
       model ? /* @__PURE__ */ figma.widget.h(figma.widget.Fragment, null, /* @__PURE__ */ figma.widget.h(SectionTitle, { title: "Parameters", cardWidth }), /* @__PURE__ */ figma.widget.h(SectionBody, { cardWidth }, model.request ? /* @__PURE__ */ figma.widget.h(
         CodeBlock,
         {
@@ -1084,8 +1090,13 @@ ${lines.join("\n")}
     return 750;
   }
   function widthModeLabel(mode) {
-    var _a, _b;
-    return (_b = (_a = WIDTH_OPTIONS.find((option) => option.option === mode)) == null ? void 0 : _a.label) != null ? _b : "Standard";
+    if (mode === "compact") {
+      return "Compact";
+    }
+    if (mode === "wide") {
+      return "Wide";
+    }
+    return "Standard";
   }
   function compactPathFontSize(path) {
     const length = path.length;

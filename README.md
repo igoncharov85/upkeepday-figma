@@ -17,7 +17,7 @@ The widget icon source asset is included at `assets/upkeepday-fav.png`, with a b
 
 ## Usage
 
-Insert the widget, then use **Configure** from the widget controls or property menu and enter:
+Insert the widget, then click the unconfigured widget or use **Configure** from the widget controls or property menu and enter:
 
 - Swagger/OpenAPI JSON URL, for example `https://petstore3.swagger.io/api/v3/openapi.json`
 - Method: `GET`, `POST`, `PUT`, or `DELETE`
@@ -31,10 +31,7 @@ The widget renders the endpoint header, request body example, and `200` response
 
 ## Refreshing
 
-The widget stores its Swagger URL, method, and path in synced state. Refresh it with:
-
-- The visible **Refresh** control on the widget.
-- The widget property menu **Refresh** action.
+The widget stores its Swagger URL, method, and path in synced state. After the first endpoint generation, refresh it with the visible **Refresh** control or the property menu **Refresh** action. The property menu width control also appears after the first generation.
 
 ## Checks
 
