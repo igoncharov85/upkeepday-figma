@@ -1553,7 +1553,14 @@ ${lines.join("\n")}
     };
   }
   async function readVariableConfig() {
-    const variables = await figma.variables.getLocalVariablesAsync("STRING");
+    const variablesApi = figmaVariablesApi();
+    if (!variablesApi) return {};
+    let variables;
+    try {
+      variables = await variablesApi.getLocalVariablesAsync("STRING");
+    } catch (e) {
+      return {};
+    }
     const swaggerUrl = variableStringValue(variables, "SwaggerUrl");
     const methodValue = variableStringValue(variables, "ApiAction");
     const path = variableStringValue(variables, "ApiPath");
@@ -1566,6 +1573,13 @@ ${lines.join("\n")}
       }
     }
     return { swaggerUrl, method, path };
+  }
+  function figmaVariablesApi() {
+    const candidate = figma.variables;
+    if (!candidate || typeof candidate.getLocalVariablesAsync !== "function") {
+      return void 0;
+    }
+    return candidate;
   }
   async function readSavedSwaggerUrl() {
     const savedValue = await figma.clientStorage.getAsync(LAST_CONFIG_STORAGE_KEY);

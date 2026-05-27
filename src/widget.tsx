@@ -58,6 +58,9 @@ type WidgetConfig = {
 type WidthMode = "compact" | "standard" | "wide";
 type SampleTheme = "dark" | "light";
 type TypescriptModelTab = "Payload" | "Response";
+type FigmaVariablesApi = {
+  getLocalVariablesAsync: (type: "STRING") => Promise<Variable[]>;
+};
 
 const WIDTH_OPTIONS: Array<{ option: WidthMode; label: string }> = [
   { option: "compact", label: "Compact" },
@@ -1096,7 +1099,16 @@ function parseMessage(message: unknown): PluginMessage | undefined {
 }
 
 async function readVariableConfig(): Promise<Partial<GenerateInput>> {
-  const variables = await figma.variables.getLocalVariablesAsync("STRING");
+  const variablesApi = figmaVariablesApi();
+  if (!variablesApi) return {};
+
+  let variables: Variable[];
+  try {
+    variables = await variablesApi.getLocalVariablesAsync("STRING");
+  } catch {
+    return {};
+  }
+
   const swaggerUrl = variableStringValue(variables, "SwaggerUrl");
   const methodValue = variableStringValue(variables, "ApiAction");
   const path = variableStringValue(variables, "ApiPath");
@@ -1111,6 +1123,14 @@ async function readVariableConfig(): Promise<Partial<GenerateInput>> {
   }
 
   return { swaggerUrl, method, path };
+}
+
+function figmaVariablesApi(): FigmaVariablesApi | undefined {
+  const candidate = (figma as unknown as { variables?: Partial<FigmaVariablesApi> }).variables;
+  if (!candidate || typeof candidate.getLocalVariablesAsync !== "function") {
+    return undefined;
+  }
+  return candidate as FigmaVariablesApi;
 }
 
 async function readSavedSwaggerUrl(): Promise<string | undefined> {
